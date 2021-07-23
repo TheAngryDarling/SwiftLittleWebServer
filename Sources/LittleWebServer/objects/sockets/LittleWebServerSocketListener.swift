@@ -14,7 +14,7 @@ open class LittleWebServerSocketListener: LittleWebServerSocketConnection,
                                           LittleWebServerListener {
     
     /// The default maximum socket listener back log size
-    public static let DEFAULT_MAX_BACK_LOG_SIZE: Int32 = 0
+    public static let DEFAULT_MAX_BACK_LOG_SIZE: Int32 = 127
     
     
     private let isListenerLock = NSLock()
