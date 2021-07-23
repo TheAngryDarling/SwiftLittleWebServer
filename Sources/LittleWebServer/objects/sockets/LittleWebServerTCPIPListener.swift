@@ -95,10 +95,14 @@ public class LittleWebServerTCPIPListener: LittleWebServerSocketListener {
     ///   - port: The port to listen on or the first available port. (Default: any)
     ///   - reuseAddr: Indicator if
     ///   - scheme: The URL Scheme used for this connection if available
+    ///   - maxBacklogSize: The maximun number of connection that can be waiting to be accpeted
+    ///   - enablePortSharing: Indicator if port sharing should occur on inet6 sockets
     public init(_ ipAddress: IPAddress = .firstAvailable,
                 port: Address.TCPIPPort = .firstAvailable,
                 reuseAddr: Bool = true,
-                scheme: String? = nil) throws {
+                scheme: String? = nil,
+                maxBacklogSize: Int32 = LittleWebServerSocketListener.DEFAULT_MAX_BACK_LOG_SIZE,
+                enablePortSharing: Bool = true) throws {
         
         let scheme: String = scheme ?? LittleWebServerDefaultSchemePort.default(for: port)?.scheme ?? ""
         
@@ -107,66 +111,66 @@ public class LittleWebServerTCPIPListener: LittleWebServerSocketListener {
         var actualPort: Address.TCPIPPort = port
         
         switch ipAddress {
-        case .specific(let workingIP):
-            socketfd = try LittleWebServerSocketConnection.newStreamSocket(family: workingIP.family)
-            
-            do {
-                try LittleWebServerTCPIPListener.bind(socketfd, ip:
-                                                        workingIP,
-                                                      on: actualPort)
-            } catch {
-                LittleWebServerSocketConnection.closeSocket(socketfd)
-                socketfd = LittleWebServerSocketConnection.SOCKET_INVALID_DESCRIPTOR
-               
-                throw SocketError.socketBindFailed(error)
-            }
-            
-            actualIP = workingIP
-        case .anyAvailable(let anyAvailable):
-            let targetInfos:  [(family: Address.IP.Family, targets: UnsafeMutablePointer<addrinfo>)]
-            var families: Address.IP.Families = []
-            if anyAvailable == .any || anyAvailable == .ipV6 {
-                families.insert(.inet6)
-            }
-            if anyAvailable == .any || anyAvailable == .ipV4 {
-                families.insert(.inet4)
-            }
-            
-            targetInfos = try LittleWebServerTCPIPListener.getTargetInfoOptions(families: families,
-                                                                                node: nil,
-                                                                                port: port)
-            
-            defer {
-                for item in targetInfos {
-                    freeaddrinfo(item.targets)
-                }
-            }
-            
-            for ti in targetInfos where actualIP == nil {
+            case .specific(let workingIP):
+                socketfd = try LittleWebServerSocketConnection.newStreamSocket(family: workingIP.family)
                 
-                if socketfd != LittleWebServerSocketConnection.SOCKET_INVALID_DESCRIPTOR {
+                do {
+                    try LittleWebServerTCPIPListener.bind(socketfd,
+                                                          ip: workingIP,
+                                                          on: actualPort)
+                } catch {
                     LittleWebServerSocketConnection.closeSocket(socketfd)
                     socketfd = LittleWebServerSocketConnection.SOCKET_INVALID_DESCRIPTOR
+                   
+                    throw SocketError.socketBindFailed(error)
                 }
-                socketfd = try LittleWebServerSocketConnection.newStreamSocket(family: ti.family)
                 
+                actualIP = workingIP
+            case .anyAvailable(let anyAvailable):
+                let targetInfos:  [(family: Address.IP.Family, targets: UnsafeMutablePointer<addrinfo>)]
+                var families: Address.IP.Families = []
+                if anyAvailable == .any || anyAvailable == .ipV6 {
+                    families.insert(.inet6)
+                }
+                if anyAvailable == .any || anyAvailable == .ipV4 {
+                    families.insert(.inet4)
+                }
                 
-                var info: UnsafeMutablePointer<addrinfo>? = ti.targets
+                targetInfos = try LittleWebServerTCPIPListener.getTargetInfoOptions(families: families,
+                                                                                    node: nil,
+                                                                                    port: port)
                 
-                while info != nil {
-
-                    do {
-                        try LittleWebServerTCPIPListener.bind(socketfd,
-                                                              address: info!.pointee.ai_addr,
-                                                              addressLength: info!.pointee.ai_addrlen)
-                        actualIP = LittleWebServerSocketConnection.Address.IP(addressInfo: info!.pointee)
-                        break
-                    } catch {
-                        // Try the next one...
-                        info = info?.pointee.ai_next
+                defer {
+                    for item in targetInfos {
+                        freeaddrinfo(item.targets)
                     }
                 }
-            }
+                
+                for ti in targetInfos where actualIP == nil {
+                    
+                    if socketfd != LittleWebServerSocketConnection.SOCKET_INVALID_DESCRIPTOR {
+                        LittleWebServerSocketConnection.closeSocket(socketfd)
+                        socketfd = LittleWebServerSocketConnection.SOCKET_INVALID_DESCRIPTOR
+                    }
+                    socketfd = try LittleWebServerSocketConnection.newStreamSocket(family: ti.family)
+                    
+                    
+                    var info: UnsafeMutablePointer<addrinfo>? = ti.targets
+                    
+                    while info != nil {
+
+                        do {
+                            try LittleWebServerTCPIPListener.bind(socketfd,
+                                                                  address: info!.pointee.ai_addr,
+                                                                  addressLength: info!.pointee.ai_addrlen)
+                            actualIP = LittleWebServerSocketConnection.Address.IP(addressInfo: info!.pointee)
+                            break
+                        } catch {
+                            // Try the next one...
+                            info = info?.pointee.ai_next
+                        }
+                    }
+                }
         }
         
         if actualIP == nil {
@@ -202,7 +206,11 @@ public class LittleWebServerTCPIPListener: LittleWebServerSocketListener {
         self._address = Address.ip(realIP, port: actualPort)
         
         //try super.init(socketfd, family: realIP.family, proto: .tcp, scheme: scheme)
-        try super.init(socketfd, address: self._address, scheme: scheme)
+        try super.init(socketfd,
+                       address: self._address,
+                       scheme: scheme,
+                       maxBacklogSize: maxBacklogSize,
+                       enablePortSharing: enablePortSharing)
         
         
     }
@@ -274,10 +282,9 @@ public class LittleWebServerTCPIPListener: LittleWebServerSocketListener {
     /// Get a list of available addresses for the given family, node (ip address if provided) and port
     /// - Parameters:
     ///   - families: The address family (
-    ///   - node: <#node description#>
-    ///   - port: <#port description#>
-    /// - Throws: <#description#>
-    /// - Returns: <#description#>
+    ///   - node: The IP address to test if available
+    ///   - port: The port to test if available
+    /// - Returns: Returns an array of available TCP/IP Family and Addresses that could be used
     private static func getTargetInfoOptions(families: Address.IP.Families,
                                              node: String? = nil,
                                              port: Address.TCPIPPort) throws -> [(family: Address.IP.Family, targets: UnsafeMutablePointer<addrinfo>)] {
@@ -328,20 +335,41 @@ public class LittleWebServerTCPIPListener: LittleWebServerSocketListener {
 
 public class LittleWebServerHTTPListener: LittleWebServerTCPIPListener {
     /// Create a new TCP/IP Connection with the http scheme
+    /// - Parameters:
+    ///   - ipAddress: The ip address to listen on or first available address. (Default: first available)
+    ///   - port: The port to listen on
+    ///   - reuseAddr: Indicator if
+    ///   - maxBacklogSize: The maximun number of connection that can be waiting to be accpeted
+    ///   - enablePortSharing: Indicator if port sharing should occur on inet6 sockets
     public init(_ ipAddress: IPAddress = .firstAvailable,
                 port: Address.TCPIPPort,
-                reuseAddr: Bool = true) throws {
+                reuseAddr: Bool = true,
+                maxBacklogSize: Int32 = LittleWebServerSocketListener.DEFAULT_MAX_BACK_LOG_SIZE,
+                enablePortSharing: Bool = true) throws {
         try super.init(ipAddress,
                        port: port,
                        reuseAddr: reuseAddr,
-                       scheme: "http")
+                       scheme: "http",
+                       maxBacklogSize: maxBacklogSize,
+                       enablePortSharing: enablePortSharing)
     }
     
+    /// Create a new TCP/IP Connection with the http scheme
+    /// - Parameters:
+    ///   - ip: The specific IP Address to listen on
+    ///   - port: The port to listen on
+    ///   - reuseAddr: Indicator if
+    ///   - maxBacklogSize: The maximun number of connection that can be waiting to be accpeted
+    ///   - enablePortSharing: Indicator if port sharing should occur on inet6 sockets
     public convenience init(specificIP ip: LittleWebServerSocketConnection.Address.IP,
                             port: LittleWebServerSocketConnection.Address.TCPIPPort,
-                            reuseAddr: Bool = true) throws {
+                            reuseAddr: Bool = true,
+                            maxBacklogSize: Int32 = LittleWebServerSocketListener.DEFAULT_MAX_BACK_LOG_SIZE,
+                            enablePortSharing: Bool = true) throws {
         try self.init(.specific(ip),
                       port: port,
-                      reuseAddr: reuseAddr)
+                      reuseAddr: reuseAddr,
+                      maxBacklogSize: maxBacklogSize,
+                      enablePortSharing: enablePortSharing)
     }
 }
