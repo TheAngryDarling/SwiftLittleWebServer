@@ -123,8 +123,13 @@ internal class _LittleWebServerOutputStream: LittleWebServerOutputStream {
     public func close() throws {
         // Only write end chunk if we're writing chunked data
         // AND we have not already wrote the end chunk
-        if self.chunked && !self.hasWrittenZeroChunk {
+        // AND we are still connected to client
+        if self.chunked &&
+           !self.hasWrittenZeroChunk &&
+            self.isConnected {
+            self.hasWrittenZeroChunk = true
             try self.client.writeUTF8("0\r\n\r\n")
+            
         }
     }
 }
