@@ -13,8 +13,13 @@ internal class _LittleWebServerOutputStream: LittleWebServerOutputStream {
     
     public static let FileTransferBufferSize: UInt = 1024
     private let client: LittleWebServerClient
+    /// Indicator if data should be sent in cunks
     public let chunked: Bool
+    /// Indicator to keep track if the zero (end) chunk has been sent
+    private var hasWrittenZeroChunk: Bool = false
+    /// The maximum chunk size to use.  If not set then will use the total size being written
     private let maxChunkedSize: Int?
+    /// The maximum number of byte to buffer to read each time when transfering file data.  This can be overridden by the speed limiter
     private let fileTransferBufferSize: UInt
     
     public var isConnected: Bool { return self.client.isConnected }
@@ -46,6 +51,14 @@ internal class _LittleWebServerOutputStream: LittleWebServerOutputStream {
             return
         }
         
+        guard length > 0 else {
+            if !self.hasWrittenZeroChunk {
+                try self.client.writeUTF8("0\r\n\r\n")
+            }
+            self.hasWrittenZeroChunk = true
+            return
+        }
+        
         let mxChunkSize = self.maxChunkedSize ?? length
         var currentWritten: Int = 0
         while currentWritten < length {
@@ -60,7 +73,8 @@ internal class _LittleWebServerOutputStream: LittleWebServerOutputStream {
             try self.client.writeUTF8Line(chunkHexSize)
             
             try self.client.writeBuffer(pointer + currentWritten, length: chunkSize)
-            try self.writeUTF8Line("")
+            //try self.writeUTF8Line("")
+            try self.client.writeUTF8("\r\n")
             
             currentWritten += chunkSize
             
@@ -107,8 +121,10 @@ internal class _LittleWebServerOutputStream: LittleWebServerOutputStream {
     }
     
     public func close() throws {
-        if self.chunked {
-            try self.writeUTF8Line("0")
+        // Only write end chunk if we're writing chunked data
+        // AND we have not already wrote the end chunk
+        if self.chunked && !self.hasWrittenZeroChunk {
+            try self.client.writeUTF8("0\r\n\r\n")
         }
     }
 }
