@@ -158,7 +158,7 @@ public extension LittleWebServer.HTTP.Communicators {
         ///   - server: The server the request was made on
         ///   - sessionManager: The session manager being used
         ///   - client: The client connection the request came from
-        ///   - signalRequestResponseEvent: Callback used to receive information of what was written to the client
+        ///   - signalServerEvent: Callback used to receive information of what was written to the client
         ///   - signalServerError: Callback used when there was an error when writing
         /// - Returns: Returns an indicator if the processing actually moved to a different queue
         private func hopToQueue(queue: LittleWebServer.HTTP.Response.ProcessQueue,
@@ -169,7 +169,7 @@ public extension LittleWebServer.HTTP.Communicators {
                                 server: LittleWebServer,
                                 sessionManager: LittleWebServerSessionManager,
                                 client: LittleWebServerClient,
-                                signalRequestResponseEvent: @escaping (LittleWebServer.RequestResponseEvent) -> Void,
+                                signalServerEvent: @escaping (_ event: LittleWebServer.ServerEvent) -> Void,
                                 signalServerError: @escaping (Error, String, Int) -> Void) throws -> Bool {
             guard !queue.isCurrent else { return false }
             
@@ -183,12 +183,13 @@ public extension LittleWebServer.HTTP.Communicators {
                 let oldServer = Thread.current.littleWebServerDetails.webServer
                 defer { Thread.current.littleWebServerDetails.webServer = oldServer }
                 Thread.current.littleWebServerDetails.webServer = server
-                
                 defer {
                     client.close()
                     for file in uploadedFiles {
                         try? FileManager.default.removeItem(at: file.location)
                     }
+                    signalServerEvent(.clientDisconnected(client.connectionDetails,
+                                                          .normal))
                 }
                 var hasPreviouslyWrittenHeaders: Bool = false
                 do {
@@ -200,7 +201,7 @@ public extension LittleWebServer.HTTP.Communicators {
                                    to: client,
                                    hasPreviouslyWrittenHeaders: &hasPreviouslyWrittenHeaders,
                                    keepAlive: true,
-                                   signalRequestResponseEvent: signalRequestResponseEvent)
+                                   signalServerEvent: signalServerEvent)
                 } catch {
                     let err = LittleWebServer.WebRequestError.queueProcessError(queue,
                                                                                   .request(request,
@@ -228,7 +229,7 @@ public extension LittleWebServer.HTTP.Communicators {
         ///   - client: The client connection the request came from
         ///   - hasPreviouslyWrittenHeaders: Indicator if a header has already been written for the given request (Could occur if includes where called)
         ///   - keepAlive: Indicator if the client connection should be kept alive
-        ///   - signalRequestResponseEvent: Callback used to receive information of what was written to the client
+        ///   - signalServerEvent: Callback used to receive information of what was written to the client
         private func write(_ request: LittleWebServer.HTTP.Request?,
                            _ response: LittleWebServer.HTTP.Response,
                            in controller: LittleWebServer.Routing.Requests.RouteController,
@@ -237,7 +238,7 @@ public extension LittleWebServer.HTTP.Communicators {
                            to client: LittleWebServerClient,
                            hasPreviouslyWrittenHeaders: inout Bool,
                            keepAlive: Bool? = nil,
-                           signalRequestResponseEvent: (LittleWebServer.RequestResponseEvent) -> Void) throws {
+                           signalServerEvent: @escaping (_ event: LittleWebServer.ServerEvent) -> Void) throws {
             
             
             
@@ -318,6 +319,10 @@ public extension LittleWebServer.HTTP.Communicators {
             if let ctl = bodyDetails?.length/*, ctl > 0*/ {
                 workingHeaders.contentLength = ctl //+ 2 // Add CRLF
             }
+            if let ct: LittleWebServer.HTTP.Headers.ContentType = bodyDetails?.contentType,
+               workingHeaders.contentType == nil {
+                workingHeaders.contentType = ct
+            }
             
             if workingHeaders.contentLength == nil && workingHeaders[.upgrade] == nil {
                 workingHeaders.transferEncodings += .chunked
@@ -342,13 +347,15 @@ public extension LittleWebServer.HTTP.Communicators {
                 //print(respLine)
                 //print(workingHeaders.httpContent)
                 
-                signalRequestResponseEvent(.outgoingResposne(.init(response), for: request))
+                signalServerEvent(.requestEvent(client.connectionDetails,
+                                                .outgoingResposne(.init(response),
+                                                                  for: request)))
                 
                 
             }
             
-            let writer = _LittleWebServerOutputStream(client: client,
-                                                     transferEncodings: workingHeaders.transferEncodings)
+            let writer = HTTPLittleWebServerOutputStreamV1_1(client: client,
+                                                             transferEncodings: workingHeaders.transferEncodings)
             
             
             
@@ -374,20 +381,25 @@ public extension LittleWebServer.HTTP.Communicators {
                                      from listener: LittleWebServerListener,
                                      server: LittleWebServer,
                                      sessionManager: LittleWebServerSessionManager,
-                                     signalRequestResponseEvent: @escaping (LittleWebServer.RequestResponseEvent) -> Void,
+                                     signalServerEvent: @escaping (_ event: LittleWebServer.ServerEvent) -> Void,
                                      signalServerError: @escaping (Error, String, Int) -> Void) {
             
             self.getOperationQueue(for: .request).addOperation { [server, client] in
             
+                signalServerEvent(.clientConnected(client.connectionDetails))
+                
                 let oldServer = Thread.current.littleWebServerDetails.webServer
                 defer { Thread.current.littleWebServerDetails.webServer = oldServer }
                 Thread.current.littleWebServerDetails.webServer = server
-                
+                var clientDisconnectReason: LittleWebServer.ServerEvent.ClientDisconnectReason = .normal
                 var hoppingQueue: Bool = false
                 defer {
-                    
-                    if !hoppingQueue && client.isConnected {
-                        client.close()
+                    if !hoppingQueue {
+                        if client.isConnected {
+                            client.close()
+                        }
+                        signalServerEvent(.clientDisconnected(client.connectionDetails,
+                                                              clientDisconnectReason))
                     }
                 }
                 
@@ -402,6 +414,9 @@ public extension LittleWebServer.HTTP.Communicators {
                       requestCount < maxRequestCount && // while we haven't reach the max requests per connection
                       !server.isStoppingOrStopped && 
                       !Thread.current.isCancelled { // If the thread is being cancelled.  Ususallay mans that we're shutting down
+                    
+                    clientDisconnectReason = .normal
+                    
                     let startTime = Date()
                     defer {
                         if client.isConnected {
@@ -425,21 +440,30 @@ public extension LittleWebServer.HTTP.Communicators {
                             let semaphore = DispatchSemaphore(value: 0)
                             DispatchQueue.global().async {
                                 do {
-                                    requestHead = try client.readRequestHead()
+                                    requestHead = try HTTPParserV1_1.readRequestHead(from: client)
                                 } catch {
+                                    if let e = error as? LittleWebServerClientHTTPReadError {
+                                        if case LittleWebServerClientHTTPReadError.invalidRequestHead(let str) = e {
+                                            clientDisconnectReason = .badRequest(str)
+                                        }
+                                    }
+                                    
                                     if client.isConnected {
                                         // error parsing request
                                         headReadError = error
                                     }
+                                    client.close()
                                 }
                                 semaphore.signal()
                             }
                             
                             guard semaphore.wait(timeout: (.now() + server.initialRequestTimeoutInSeconds)) == .success else {
-                                
+                                clientDisconnectReason = .readRequestTimedOut
                                 server.signalServerError(error: LittleWebServer.WebRequestError.connectionTimedOut(.connectionId(client.uid)))
+                                if client.isConnected {
+                                    client.close()
+                                }
                                 
-                                client.close()
                                 return false
                             }
                             if !client.isConnected {
@@ -448,15 +472,24 @@ public extension LittleWebServer.HTTP.Communicators {
                             
                         } else {
                             do {
-                                requestHead = try client.readRequestHead()
+                                requestHead = try HTTPParserV1_1.readRequestHead(from: client)
                             } catch {
+                                if let e = error as? LittleWebServerClientHTTPReadError {
+                                    if case LittleWebServerClientHTTPReadError.invalidRequestHead(let str) = e {
+                                        clientDisconnectReason = .badRequest(str)
+                                    }
+                                }
+                                // error parsing request
+                                headReadError = error
+                                return false
+                                /*
                                 if client.isConnected {
                                     // error parsing request
-                                    print(error)
                                     headReadError = error
                                 } else {
                                     return false
                                 }
+                                */
                             }
                         }
                         
@@ -471,7 +504,7 @@ public extension LittleWebServer.HTTP.Communicators {
                                                sessionManager: sessionManager,
                                                to: client,
                                                hasPreviouslyWrittenHeaders: &sentResponseHead,
-                                               signalRequestResponseEvent: signalRequestResponseEvent)
+                                               signalServerEvent: signalServerEvent)
                             }
                             
                             
@@ -481,7 +514,7 @@ public extension LittleWebServer.HTTP.Communicators {
                         }
                         var request: LittleWebServer.HTTP.Request! = nil
                         var headers: LittleWebServer.HTTP.Request.Headers! = nil
-                        let bodyInputStream = _LittleWebServerInputStream(client: client)
+                        let bodyInputStream = HTTPLittleWebServerInputStreamV1_1(client: client)
                         var contentLength: UInt? = nil
                         
                         // Indicator if we should kill connectioh
@@ -493,7 +526,7 @@ public extension LittleWebServer.HTTP.Communicators {
                         var router: LittleWebServer.Routing.Requests.RouteController? = nil
                         
                         do {
-                            headers = try client.readRequestHeaders()
+                            headers = try HTTPParserV1_1.readRequestHeaders(from: client)
                             if headers.connection == .close {
                                 keepAlive = false
                             }
@@ -502,7 +535,7 @@ public extension LittleWebServer.HTTP.Communicators {
                             bodyInputStream.reportedContentLength = contentLength
                             
                             
-                            let tempDirURL: URL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("LittleWebServer").appendingPathComponent(headers.host?.name.description ?? "default")
+                            let tempDirURL: URL = server.temporaryFileUploadLocation.appendingPathComponent(headers.host?.name.description ?? "default")
                            
                             if headers.contentType?.resourceType == .multiPartForm {
                                 // Only check and create temp folder if the request is a multi-part
@@ -519,7 +552,7 @@ public extension LittleWebServer.HTTP.Communicators {
                                 headers.cookies.sessionIds.append(sId)
                             }
                             
-                            request = try Timer.xcodeDuration(of: try LittleWebServer.HTTP.Request.parse(scheme: listener.scheme,
+                            request = try Timer.xcodeDuration(of: try HTTPParserV1_1.parseRequest(scheme: listener.scheme,
                                                                                     head: httpHead,
                                                                                     headers: headers,
                                                                                     bodyStream: bodyInputStream,
@@ -535,7 +568,9 @@ public extension LittleWebServer.HTTP.Communicators {
                             
                             sessionId = request.getSession(false)?.id
                             
-                            signalRequestResponseEvent(.incomminRequest(request))
+                            //signalRequestResponseEvent(.incomminRequest(request))
+                            signalServerEvent(.requestEvent(client.connectionDetails,
+                                                            .incomminRequest(request)))
                             
                             
                             router = Timer.xcodeDuration(of: server.hosts.getRoutes(for: request,
@@ -555,7 +590,7 @@ public extension LittleWebServer.HTTP.Communicators {
                                                     server: server,
                                                     sessionManager: sessionManager,
                                                     client: client,
-                                                    signalRequestResponseEvent: signalRequestResponseEvent,
+                                                    signalServerEvent: signalServerEvent,
                                                     signalServerError: signalServerError)) {
                                 hoppingQueue = true
                                 return false
@@ -567,7 +602,7 @@ public extension LittleWebServer.HTTP.Communicators {
                                                                       to: client,
                                                                       hasPreviouslyWrittenHeaders: &sentResponseHead,
                                                                       keepAlive: keepAlive,
-                                                                      signalRequestResponseEvent: signalRequestResponseEvent)) { duration, _, _ in
+                                                                      signalServerEvent:  signalServerEvent)) { duration, _, _ in
                                     print("Writing response (\(response.head.responseCode) took \(duration) seconds")
                                     //print(response.head.string(for: server))
                                     //response
@@ -605,7 +640,7 @@ public extension LittleWebServer.HTTP.Communicators {
                                                    sessionManager: sessionManager,
                                                    to: client,
                                                    hasPreviouslyWrittenHeaders: &sentResponseHead,
-                                                   signalRequestResponseEvent: signalRequestResponseEvent)
+                                                   signalServerEvent: signalServerEvent)
                                 } catch {
                                     killConnection = true
                                 }
