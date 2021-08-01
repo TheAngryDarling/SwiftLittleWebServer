@@ -191,13 +191,17 @@ public extension LittleWebServer {
             headers.contentLength = contentLength
             
             if request.method == .get || request.method == .head {
-                if let ifModSince = request.headers.ifModifiedSince {
-                    if fileModDate == ifModSince {
+                if let headerDate = request.headers.ifModifiedSince {
+                    // if date is <= headerDate then not modified
+                    let results: [ComparisonResult] = [.orderedAscending, .orderedSame]
+                    if results.contains(Calendar.current.compare(fileModDate, to: headerDate, toGranularity: .second)) {
                         return .notModified(headers: headers)
                     }
                     
-                } else if let ifUnModSince = request.headers.ifUnmodifiedSince {
-                    if fileModDate != ifUnModSince {
+                } else if let headerDate = request.headers.ifUnmodifiedSince {
+                    // if date is >= headerDate then not modified
+                    let results: [ComparisonResult] = [.orderedDescending, .orderedSame]
+                    if results.contains(Calendar.current.compare(fileModDate, to: headerDate, toGranularity: .second)) {
                         return .notModified(headers: headers)
                     }
                 } else if let ifMatch = request.headers.ifMatch {
@@ -208,8 +212,8 @@ public extension LittleWebServer {
                     if headers.eTag == noneMatch {
                         return .notModified(headers: headers)
                     }
-                } else if let rangeDate = request.headers.ifRangeDate {
-                    if fileModDate != rangeDate {
+                } else if let headerDate = request.headers.ifRangeDate {
+                    if Calendar.current.compare(fileModDate, to: headerDate, toGranularity: .second) != .orderedSame {
                         fileRanges = nil
                     }
                 } else if let rangeTag = request.headers.ifRange {
@@ -245,7 +249,7 @@ public extension LittleWebServer {
                         file.close()
                     }
                     
-                    let fileTransferBufferSize = Int(speedLimit.bufferSize ??  _LittleWebServerOutputStream.FileTransferBufferSize)
+                    let fileTransferBufferSize = Int(speedLimit.bufferSize ??  output.defaultFileTransferBufferSize)
                     
                     let buffer = UnsafeMutablePointerContainer<UInt8>(capacity: fileTransferBufferSize)
                     defer {
@@ -519,14 +523,14 @@ public extension LittleWebServer {
                                  directoryListing: ShareDirectoryListingResponder? = nil,
                                  fileNotFoundMessage: ShareDirectoryResourceNotFoundMessageResponder? = nil,
                                  noDirBrowsingMessage: ShareDirectoryNoDirectoryListingMessageResponder? = nil,
-                                 noAccessMessage: ShareDirectoryNoAccessMessageResponder? = nil) -> ((HTTP.Request, Routing.Requests.RouteController) -> HTTP.Response?) {
+                                 noAccessMessage: ShareDirectoryNoAccessMessageResponder? = nil) -> (LittleWebServerRoutePathConditions, LittleWebServer.Routing.Requests.RouteController) -> Void {
             
             let fileNotFound = fileNotFoundMessage ?? FSSharing.defaultSharedResourceNotFoundMessage
             let noDirBrowsing = noDirBrowsingMessage ?? FSSharing.defaultSharedNoDirectoryListing
             let noAccess = noAccessMessage ?? FSSharing.defaultNoAccess
             let directoryListing = directoryListing ?? FSSharing.listDirectory
             
-            return { (request: HTTP.Request, controller: Routing.Requests.RouteController) -> HTTP.Response in
+            func shareHandler(request: HTTP.Request, controller: Routing.Requests.RouteController) -> HTTP.Response {
                 guard let path = request.identities["path"] as? String else {
                     // Should never get here
                     return controller.internalError(for: request, message: "Unable to find path identifier")
@@ -595,6 +599,21 @@ public extension LittleWebServer {
                     return .forbidden(body: noAccess(request))
                 }
             }
+            
+            return { path, controller in
+                
+                var pth = path
+                if pth.last!.identifier == nil {
+                    pth.append(":path{**}")
+                }
+                guard let ident = pth.last?.identifier,
+                      ident == "path" else {
+                    fatalError("Route Path must not end in an identifier or must have the identifier of 'path'")
+                }
+                
+                controller[pth] = shareHandler
+                
+            }
         }
         
         /// Share a file system resource at the given path
@@ -620,7 +639,7 @@ public extension LittleWebServer {
                                  directoryListing: ShareDirectoryListingResponder? = nil,
                                  fileNotFoundMessage: ShareDirectoryResourceNotFoundMessageResponder? = nil,
                                  noDirBrowsingMessage: ShareDirectoryNoDirectoryListingMessageResponder? = nil,
-                                 noAccessMessage: ShareDirectoryNoAccessMessageResponder? = nil) -> ((HTTP.Request, Routing.Requests.RouteController) -> HTTP.Response?) {
+                                 noAccessMessage: ShareDirectoryNoAccessMessageResponder? = nil) -> (LittleWebServerRoutePathConditions, LittleWebServer.Routing.Requests.RouteController) -> Void {
             return self.share(resource: resource,
                               defaultIndexFiles: defaultIndexFiles,
                               allowDirectoryBrowsing: allowDirectoryBrowsing,
@@ -652,7 +671,7 @@ public extension LittleWebServer {
                                  speedLimiter: @escaping FileTransferSpeedHandler = { _, _ in return .unlimited},
                                  directoryListing: ShareDirectoryListingResponder? = nil,
                                  fileNotFoundMessage: ShareDirectoryResourceNotFoundMessageResponder? = nil,
-                                 noDirBrowsingMessage: ShareDirectoryNoDirectoryListingMessageResponder? = nil) -> ((HTTP.Request, Routing.Requests.RouteController) -> HTTP.Response?) {
+                                 noDirBrowsingMessage: ShareDirectoryNoDirectoryListingMessageResponder? = nil) -> (LittleWebServerRoutePathConditions, LittleWebServer.Routing.Requests.RouteController) -> Void {
             
             
             return self.share(resource: { _ in return resource },
@@ -684,7 +703,7 @@ public extension LittleWebServer {
                                  speedLimiter: LittleWebServer.FileTransferSpeedLimiter,
                                  directoryListing: ShareDirectoryListingResponder? = nil,
                                  fileNotFoundMessage: ShareDirectoryResourceNotFoundMessageResponder? = nil,
-                                 noDirBrowsingMessage: ShareDirectoryNoDirectoryListingMessageResponder? = nil) -> ((HTTP.Request, Routing.Requests.RouteController) -> HTTP.Response?) {
+                                 noDirBrowsingMessage: ShareDirectoryNoDirectoryListingMessageResponder? = nil) -> (LittleWebServerRoutePathConditions, LittleWebServer.Routing.Requests.RouteController) -> Void {
             return self.share(resource: resource,
                               defaultIndexFiles: defaultIndexFiles,
                               allowDirectoryBrowsing: allowDirectoryBrowsing,
