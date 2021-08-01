@@ -1408,7 +1408,10 @@ public struct LittleWebServerRoutePathConditions: LittleWebServerExpressibleBySt
             }
             
             var body: String = ""
-            if putConditionInBody && self.pathCondition != .anything && self.pathCondition != .anythingHereafter {
+            /*if putConditionInBody && self.pathCondition != .anything && self.pathCondition != .anythingHereafter {
+                body = self.pathCondition.string
+            }*/
+            if putConditionInBody {
                 body = self.pathCondition.string
             }
             if let t = self.transformation {
