@@ -10,7 +10,20 @@ import Foundation
 open class LittleWebServerClientSocket: LittleWebServerSocketConnection,
                                         LittleWebServerClient,
                                         LittleWebServerSocketClient {
-    
+    private struct SocketClientDetails: LittleWebServerSocketClientDetails {
+        var address: LittleWebServerSocketConnection.Address
+        var uid: String
+        var uuid: UUID
+        var scheme: String
+        
+        fileprivate init(_ connection: LittleWebServerClientSocket) {
+            self.address = connection.address
+            self.uid = connection.uid
+            self.uuid = connection.uuid
+            self.scheme = connection.scheme
+        }
+        
+    }
     private let _address: Address
     open override var address: Address { return self._address }
     
@@ -18,8 +31,12 @@ open class LittleWebServerClientSocket: LittleWebServerSocketConnection,
 
     /// The URL Scheme of the connection
     public let scheme: String
-    
+    public let uuid: UUID = UUID()
     open var uid: String { return "\(self.scheme)://\(self.address.description)" }
+    
+    open var socketConnectionDetails: LittleWebServerSocketClientDetails {
+        return SocketClientDetails(self)
+    }
     
     /// Create new client socket connection
     /// - Parameters:
@@ -94,6 +111,53 @@ open class LittleWebServerClientSocket: LittleWebServerSocketConnection,
 }
 
 /// A TCP/IP Client Connection
-open class LittleWebServerTCPIPClient: LittleWebServerClientSocket, LittleWebServerTCPIPSocketClient { }
+open class LittleWebServerTCPIPClient: LittleWebServerClientSocket,
+                                       LittleWebServerTCPIPSocketClient {
+    private struct TCPIPSocketClientDetails: LittleWebServerTCPIPSocketClientDetails {
+        var address: LittleWebServerSocketConnection.Address
+        var uid: String
+        var uuid: UUID
+        var scheme: String
+        
+        fileprivate init(_ connection: LittleWebServerClientSocket) {
+            self.address = connection.address
+            self.uid = connection.uid
+            self.uuid = connection.uuid
+            self.scheme = connection.scheme
+        }
+    }
+    
+    open var tcpIPSocketConnectionDetails: LittleWebServerTCPIPSocketClientDetails {
+        return TCPIPSocketClientDetails(self)
+    }
+    
+    open override var socketConnectionDetails: LittleWebServerSocketClientDetails {
+        return self.tcpIPSocketConnectionDetails
+    }
+}
 /// A Unix File Client Connection
-open class LittleWebServerUnixFileClient: LittleWebServerClientSocket, LittleWebServerUnixFileSocketClient { }
+open class LittleWebServerUnixFileClient: LittleWebServerClientSocket,
+                                          LittleWebServerUnixFileSocketClient {
+    
+    private struct UnixFileSocketClientDetails: LittleWebServerUnixFileSocketClientDetails {
+        var address: LittleWebServerSocketConnection.Address
+        var uid: String
+        var uuid: UUID
+        var scheme: String
+        
+        fileprivate init(_ connection: LittleWebServerClientSocket) {
+            self.address = connection.address
+            self.uid = connection.uid
+            self.uuid = connection.uuid
+            self.scheme = connection.scheme
+        }
+    }
+    
+    open var unixFileSocketConnectionDetails: LittleWebServerUnixFileSocketClientDetails {
+        return UnixFileSocketClientDetails(self)
+    }
+    
+    open override var socketConnectionDetails: LittleWebServerSocketClientDetails {
+        return self.unixFileSocketConnectionDetails
+    }
+}
