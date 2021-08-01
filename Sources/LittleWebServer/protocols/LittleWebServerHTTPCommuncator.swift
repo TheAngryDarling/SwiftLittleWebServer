@@ -25,8 +25,8 @@ public protocol LittleWebServerHTTPCommunicator: AnyObject {
     ///   - listener: The listener this connection came from
     ///   - server: The server this connection is running on
     ///   - sessionManager: The session manager the server is using
-    ///   - signalRequestResponseEvent: Callback used to receive information of what was written to the client
-    ///   - event: The write reponse event
+    ///   - signalServerEvent: Callback used to receive information of events have occured
+    ///   - event: The server event that occured
     ///   - signalServerError: Callback used when there was an error when writing
     ///   - error: The error that occured while writing
     ///   - file: The path to the file the error occured
@@ -35,7 +35,7 @@ public protocol LittleWebServerHTTPCommunicator: AnyObject {
                           from listener: LittleWebServerListener,
                           server: LittleWebServer,
                           sessionManager: LittleWebServerSessionManager,
-                          signalRequestResponseEvent: @escaping (_ event: LittleWebServer.RequestResponseEvent) -> Void,
+                          signalServerEvent: @escaping (_ event: LittleWebServer.ServerEvent) -> Void,
                           signalServerError: @escaping (_ error: Error,
                                                         _ file: String,
                                                         _ line: Int) -> Void)
@@ -64,8 +64,8 @@ public protocol LittleWebServerHTTPCommunicator: class {
     ///   - listener: The listener this connection came from
     ///   - server: The server this connection is running on
     ///   - sessionManager: The session manager the server is using
-    ///   - signalRequestResponseEvent: Callback used to receive information of what was written to the client
-    ///   - event: The write reponse event
+    ///   - signalServerEvent: Callback used to receive information of events have occured
+    ///   - event: The server event that occured
     ///   - signalServerError: Callback used when there was an error when writing
     ///   - error: The error that occured while writing
     ///   - file: The path to the file the error occured
@@ -74,7 +74,7 @@ public protocol LittleWebServerHTTPCommunicator: class {
                           from listener: LittleWebServerListener,
                           server: LittleWebServer,
                           sessionManager: LittleWebServerSessionManager,
-                          signalRequestResponseEvent: @escaping (_ event: LittleWebServer.RequestResponseEvent) -> Void,
+                          signalServerEvent: @escaping (_ event: LittleWebServer.ServerEvent) -> Void,
                           signalServerError: @escaping (_ error: Error,
                                                         _ file: String,
                                                         _ line: Int) -> Void)
