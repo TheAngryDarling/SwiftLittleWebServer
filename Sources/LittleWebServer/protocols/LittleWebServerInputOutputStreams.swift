@@ -23,6 +23,9 @@ public protocol LittleWebServerOutputStream: LittleWebServerClientWriter {
     /// Indicator if the stream is connected
     var isConnected: Bool { get }
     
+    /// The maximum number of byte to buffer to read each time when transfering file data.  This can be overridden by the speed limiter
+    var defaultFileTransferBufferSize: UInt { get }
+    
     /// Write the contents of a file to the output stream
     /// - Parameters:
     ///   - atPath: Path to the file to write
