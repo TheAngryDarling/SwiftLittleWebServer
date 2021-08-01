@@ -41,6 +41,23 @@ public class LittleWebServerTCPIPListener: LittleWebServerSocketListener {
             return .anyAvailable(.any)
         }
         
+        /// Representation of an IPv4 address of 0.0.0.0
+        public static var anyIPv4: IPAddress {
+            return .specific(.anyIPv4)
+        }
+        /// Representation of an IPv4 Loopback address (127.0.0.1)
+        public static var ipV4Loopback: IPAddress {
+            return .specific(.ipV4Loopback)
+        }
+        // Representation of an IPv6 address of ::
+        public static var anyIPv6: IPAddress {
+            return .specific(.anyIPv6)
+        }
+        /// Representation of an IPv6 Loopback address (::1)
+        public static var ipV6Loopback: IPAddress {
+            return .specific(.ipV6Loopback)
+        }
+        
         public init(nilLiteral: ()) {
             self = .anyAvailable(.any)
         }
