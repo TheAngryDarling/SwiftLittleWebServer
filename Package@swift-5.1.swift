@@ -13,9 +13,11 @@ let package = Package(
     ],
     dependencies: [
         // Dependencies declare other packages that this package depends on.
-        .package(url: "https://github.com/TheAngryDarling/SwiftUnitTestingHelper.git", from: "1.0.4"),
         .package(url: "https://github.com/TheAngryDarling/SwiftStringIANACharacterSetEncoding.git", from: "2.0.4"),
-        .package(url: "https://github.com/TheAngryDarling/SwiftNillable.git", from: "1.0.5")
+        .package(url: "https://github.com/TheAngryDarling/SwiftNillable.git", from: "1.0.5"),
+        
+        // Packages for Unit Testing
+        .package(url: "https://github.com/TheAngryDarling/SwiftUnitTestingHelper.git", from: "1.0.4")
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
