@@ -9,6 +9,19 @@ import Foundation
 @testable import LittleWebServer
 
 class DataWebServerClient: LittleWebServerClient {
+    public struct _LittleWebServerClientDetails: LittleWebServerClientDetails {
+        public let uid: String
+        public let uuid: UUID
+        public let scheme: String
+        
+        public init() {
+            self.uuid = UUID()
+            self.uid = self.uuid.uuidString
+            self.scheme = "TEST"
+        }
+    }
+    
+    var connectionDetails: LittleWebServerClientDetails = _LittleWebServerClientDetails()
     
     
     
@@ -18,7 +31,7 @@ class DataWebServerClient: LittleWebServerClient {
     private var deallocData: Bool
     
     public var writeData: Data = Data()
-    public let uid: String = UUID().uuidString
+    //public let uid: String = UUID().uuidString
     
     public let isConnected: Bool = true
     
