@@ -3653,6 +3653,21 @@ public extension LittleWebServer {
                 //private var folderRoute: Route<Handler> = Route<Handler>.init(condition: .anything())
                 
                 
+                public subscript(paths: LittleWebServerRoutePathConditions...) -> (LittleWebServerRoutePathConditions, RouteController?, Routes<HTTPResponse>?, Routes<HTTPResponse.Head>?) -> Void {
+                    get { fatalError("Getter unsupported.  Please only use setter") }
+                    set {
+                        for path in paths {
+                            if let r = self as? Routes<HTTPResponse> {
+                                newValue(path, nil, r, nil)
+                            } else if let r = self as? Routes<HTTPResponse.Head> {
+                                newValue(path, nil, nil, r)
+                            } else {
+                                fatalError("Unknown route expectation")
+                            }
+                        }
+                    }
+                }
+                
                 // Setter for setting request handler for the given path
                 public subscript(paths: LittleWebServerRoutePathConditions...) -> FullHandler {
                     get { fatalError("Getter unsupported.  Please only use setter") }
@@ -4040,6 +4055,15 @@ public extension LittleWebServer {
                     set {
                         for path in paths {
                             newValue(path, self)
+                        }
+                    }
+                }
+                
+                public subscript(paths: LittleWebServerRoutePathConditions...) -> (LittleWebServerRoutePathConditions, RouteController?, Routes<HTTPResponse>?, Routes<HTTPResponse.Head>?) -> Void {
+                    get { fatalError("Getter unsupported.  Please only use setter") }
+                    set {
+                        for path in paths {
+                            newValue(path, self, nil, nil)
                         }
                     }
                 }

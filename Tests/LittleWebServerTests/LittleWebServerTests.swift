@@ -359,6 +359,8 @@ class LittleWebServerTests: XCExtenedTestCase {
         // Test share location
         server.defaultHost["/path/public/"] = LittleWebServer.FSSharing.share(resource: self.testsURL,
                                                                                                 speedLimiter: speedLimiter)
+        server.defaultHost.head["/path/public/"] = LittleWebServer.FSSharing.share(resource: self.testsURL,
+                                                                                                speedLimiter: speedLimiter)
         
         server.defaultHost["/socket"] = LittleWebServer.WebSocket.endpoint { client, event in
             switch event {

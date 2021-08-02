@@ -523,7 +523,7 @@ public extension LittleWebServer {
                                  directoryListing: ShareDirectoryListingResponder? = nil,
                                  fileNotFoundMessage: ShareDirectoryResourceNotFoundMessageResponder? = nil,
                                  noDirBrowsingMessage: ShareDirectoryNoDirectoryListingMessageResponder? = nil,
-                                 noAccessMessage: ShareDirectoryNoAccessMessageResponder? = nil) -> (LittleWebServerRoutePathConditions, LittleWebServer.Routing.Requests.RouteController) -> Void {
+                                 noAccessMessage: ShareDirectoryNoAccessMessageResponder? = nil) -> (LittleWebServerRoutePathConditions, LittleWebServer.Routing.Requests.RouteController?, LittleWebServer.Routing.Requests.Routes<LittleWebServer.HTTP.Response>?, LittleWebServer.Routing.Requests.Routes<LittleWebServer.HTTP.Response.Head>?) -> Void {
             
             let fileNotFound = fileNotFoundMessage ?? FSSharing.defaultSharedResourceNotFoundMessage
             let noDirBrowsing = noDirBrowsingMessage ?? FSSharing.defaultSharedNoDirectoryListing
@@ -600,7 +600,11 @@ public extension LittleWebServer {
                 }
             }
             
-            return { path, controller in
+            func shareHandlerHead(request: HTTP.Request, controller: Routing.Requests.RouteController) -> HTTP.Response.Head {
+                return shareHandler(request: request, controller: controller).head
+            }
+            
+            return { path, controller, responseRouter, headHandler in
                 
                 var pth = path
                 if pth.last!.identifier == nil {
@@ -611,8 +615,9 @@ public extension LittleWebServer {
                     fatalError("Route Path must not end in an identifier or must have the identifier of 'path'")
                 }
                 
-                controller[pth] = shareHandler
-                
+                controller?[pth] = shareHandler
+                responseRouter?[pth] = shareHandler
+                headHandler?[pth] = shareHandlerHead
             }
         }
         
@@ -639,7 +644,7 @@ public extension LittleWebServer {
                                  directoryListing: ShareDirectoryListingResponder? = nil,
                                  fileNotFoundMessage: ShareDirectoryResourceNotFoundMessageResponder? = nil,
                                  noDirBrowsingMessage: ShareDirectoryNoDirectoryListingMessageResponder? = nil,
-                                 noAccessMessage: ShareDirectoryNoAccessMessageResponder? = nil) -> (LittleWebServerRoutePathConditions, LittleWebServer.Routing.Requests.RouteController) -> Void {
+                                 noAccessMessage: ShareDirectoryNoAccessMessageResponder? = nil) -> (LittleWebServerRoutePathConditions, LittleWebServer.Routing.Requests.RouteController?, LittleWebServer.Routing.Requests.Routes<LittleWebServer.HTTP.Response>?, LittleWebServer.Routing.Requests.Routes<LittleWebServer.HTTP.Response.Head>?) -> Void {
             return self.share(resource: resource,
                               defaultIndexFiles: defaultIndexFiles,
                               allowDirectoryBrowsing: allowDirectoryBrowsing,
@@ -671,7 +676,7 @@ public extension LittleWebServer {
                                  speedLimiter: @escaping FileTransferSpeedHandler = { _, _ in return .unlimited},
                                  directoryListing: ShareDirectoryListingResponder? = nil,
                                  fileNotFoundMessage: ShareDirectoryResourceNotFoundMessageResponder? = nil,
-                                 noDirBrowsingMessage: ShareDirectoryNoDirectoryListingMessageResponder? = nil) -> (LittleWebServerRoutePathConditions, LittleWebServer.Routing.Requests.RouteController) -> Void {
+                                 noDirBrowsingMessage: ShareDirectoryNoDirectoryListingMessageResponder? = nil) -> (LittleWebServerRoutePathConditions, LittleWebServer.Routing.Requests.RouteController?, LittleWebServer.Routing.Requests.Routes<LittleWebServer.HTTP.Response>?, LittleWebServer.Routing.Requests.Routes<LittleWebServer.HTTP.Response.Head>?) -> Void {
             
             
             return self.share(resource: { _ in return resource },
@@ -703,7 +708,7 @@ public extension LittleWebServer {
                                  speedLimiter: LittleWebServer.FileTransferSpeedLimiter,
                                  directoryListing: ShareDirectoryListingResponder? = nil,
                                  fileNotFoundMessage: ShareDirectoryResourceNotFoundMessageResponder? = nil,
-                                 noDirBrowsingMessage: ShareDirectoryNoDirectoryListingMessageResponder? = nil) -> (LittleWebServerRoutePathConditions, LittleWebServer.Routing.Requests.RouteController) -> Void {
+                                 noDirBrowsingMessage: ShareDirectoryNoDirectoryListingMessageResponder? = nil) -> (LittleWebServerRoutePathConditions, LittleWebServer.Routing.Requests.RouteController?, LittleWebServer.Routing.Requests.Routes<LittleWebServer.HTTP.Response>?, LittleWebServer.Routing.Requests.Routes<LittleWebServer.HTTP.Response.Head>?) -> Void {
             return self.share(resource: resource,
                               defaultIndexFiles: defaultIndexFiles,
                               allowDirectoryBrowsing: allowDirectoryBrowsing,
