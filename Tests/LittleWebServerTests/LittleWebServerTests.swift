@@ -75,7 +75,7 @@ class LittleWebServerTests: XCExtenedTestCase {
     
     
     private static var server: LittleWebServer? = nil
-    private static let initPort: LittleWebServerSocketConnection.Address.TCPIPPort = 64308
+    private static let initPort: LittleWebServerSocketConnection.Address.TCPIPPort = .firstAvailable //64308
     private static var triedServerInit: Bool = false
     private static let serverSync = DispatchQueue(label: "LittleWebServerTests.server.sync")
     
@@ -208,53 +208,46 @@ class LittleWebServerTests: XCExtenedTestCase {
         server.defaultHost["/"] = { (request: LittleWebServer.HTTP.Request) -> LittleWebServer.HTTP.Response in
             return .ok(body: .html(LittleWebServerTests.serverRootIndexHTML))
         }
+        
+        // Test sending json events
+        server.defaultHost["/events"] = { (request: LittleWebServer.HTTP.Request) -> LittleWebServer.HTTP.Response in
+            
+            func eventWriter(_ input: LittleWebServerInputStream, _ output: LittleWebServerOutputStream) {
+                var count: Int = 1
+                while server.isRunning && count < 100 {
+                    let eventData = "{ \"event_type\": \"system\", \"event_count\": \(count), \"event_up\": true }\n"
+                    count += 1
+                    //let dta = eventData.data(using: .utf8)!
+                    
+                    do {
+                        try output.write(eventData.data(using: .utf8)!)
+                        
+                        print("Sent event: \(count - 1)")
+                    } catch {
+                        if output.isConnected {
+                            XCTFail("OH NO: \(error)")
+                        }
+                        break
+                    }
+                    Thread.sleep(forTimeInterval: 1)
+                }
+            }
+            
+            return .ok(body: .custom(eventWriter))
+        }
+        
+        // Share readonly encodable object
         server.defaultHost["/status"] = LittleWebServer.ObjectSharing.shareObject(encoder: self.encoder,
                                                                                   object: self.serverDetails,
                                                                                   errorResponse: errorResponse)
         
         
-        /*server.defaultHost["/object"] = LittleWebServer.ObjectSharing.shareObject(encoder: self.encoder,
-                                                                                  decoder: self.decoder,
-                                                                                  getHandler: self.modifiableObject,
-                                                                                  updateHandler: { obj in
-                                                                                    self.modifiableObject = obj
-                                                                                  },
-                                                                                  errorResponse: errorResposne)*/
         
         server.defaultHost["/object"] = LittleWebServer.ObjectSharing.shareObject(encoder: self.encoder,
                                                                                   decoder: self.decoder,
                                                                                   object: &self.modifiableObject,
                                                                                   errorResponse: errorResponse)
-        /*
-        server.defaultHost["/objects"] = LittleWebServer.ObjectSharing.sharePathObjects(encoder: self.encoder,
-                                                                                        decoder: self.decoder,
-                                                                                        listHandler: self.modifiableList,
-                                                                                        getHandler: { (id: Int) -> ModifiableObject? in
-                                                                                            return self.modifiableList.first(where: { return $0.id == id })
-                                                                                        },
-                                                                                        addHandler: { (obj: ModifiableObject) -> Void in
-                                                                                            guard !self.modifiableList.contains(where: { $0.id == obj.id }) else {
-                                                                                                throw SharePathError.objectAlreadyExists(obj.id)
-                                                                                            }
-                                                                                            self.modifiableList.append(obj)
-                                                                                            self.modifiableList.sort()
-                                                                                            
-                                                                                        },
-                                                                                        updateHandler: { (id: Int, obj: ModifiableObject) -> Void in
-                                                                                            self.modifiableList.removeAll {
-                                                                                                return $0.id == obj.id
-                                                                                            }
-                                                                                            self.modifiableList.append(obj)
-                                                                                            self.modifiableList.sort()
-                                                                                        },
-                                                                                        deleteHandler: { (id: Int) -> Void in
-                                                                                            self.modifiableList.removeAll {
-                                                                                                return $0.id == id
-                                                                                            }
-                                                                                        },
-                                                                                        notFoundResponse: notFoundResposne,
-                                                                                        errorResponse: errorResponse)
-        */
+        
         server.defaultHost["/objects"] = LittleWebServer.ObjectSharing.sharePathObjects(encoder: self.encoder,
                                                                                         decoder: self.decoder,
                                                                                         objects: &self.modifiableList,
@@ -364,7 +357,7 @@ class LittleWebServerTests: XCExtenedTestCase {
         
         let speedLimiter: LittleWebServer.FileTransferSpeedLimiter = .unlimited
         // Test share location
-        server.defaultHost["/path/public/:path{**}"] = LittleWebServer.FSSharing.share(resource: self.testsURL,
+        server.defaultHost["/path/public/"] = LittleWebServer.FSSharing.share(resource: self.testsURL,
                                                                                                 speedLimiter: speedLimiter)
         
         server.defaultHost["/socket"] = LittleWebServer.WebSocket.endpoint { client, event in
@@ -658,7 +651,9 @@ class LittleWebServerTests: XCExtenedTestCase {
         func testFile(session: URLSession, realLocation: URL, webLocation: URL) {
             let semaphore = DispatchSemaphore(value: 0)
             // Test Root Path
-            let task = session.dataTask(with: webLocation) { data, response, error in
+            var request = URLRequest(url: webLocation)
+            request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            let task = session.dataTask(with: request) { data, response, error in
                 defer { semaphore.signal() }
                 guard let dta = data else {
                     var msg = "Unable to retrive response from '\(webLocation)'"
@@ -697,7 +692,9 @@ class LittleWebServerTests: XCExtenedTestCase {
                 
                 let semaphore = DispatchSemaphore(value: 0)
                 // Test Root Path
-                let task = session.dataTask(with: webLocation) { data, response, error in
+                var request = URLRequest(url: webLocation)
+                request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+                let task = session.dataTask(with: request) { data, response, error in
                     defer { semaphore.signal() }
                     guard let dta = data else {
                         var msg = "Unable to retrive response from '\(webLocation)'"
@@ -1093,8 +1090,20 @@ class LittleWebServerTests: XCExtenedTestCase {
                                                  line: line) else {
             return nil
         }
-        
-        return uploadDataNoContentReturn(data: objectData, at: url, method: method, using: session, file: file, line: line)
+        /*
+        return uploadDataNoContentReturn(data: objectData,
+                                         at: url,
+                                         method: method,
+                                         using: session,
+                                         file: file,
+                                         line: line)
+        */
+        return uploadData(data: objectData,
+                          at: url,
+                          method: method,
+                          using: session,
+                          file: file,
+                          line: line)
         
     }
     
@@ -1262,7 +1271,8 @@ class LittleWebServerTests: XCExtenedTestCase {
                                       at: objectsURL.appendingPathComponent("\(updateObject.id)"),
                                       using: session) {
             
-            guard XCTAssertsEqual(204, updated.statusCode) else {
+            
+            guard XCTAssertsTrue([200, 204].contains(updated.statusCode)) else {
                 return
             }
             
@@ -1307,6 +1317,165 @@ class LittleWebServerTests: XCExtenedTestCase {
         
         
         //asdfasdfasdf
+    }
+    
+    func testCustomResponse() {
+        
+        class DataTaskDelegate: NSObject, URLSessionDataDelegate {
+            private var receivedDataFlag: UnsafeMutablePointer<Bool>
+            public init(_ receivedDataFlag: UnsafeMutablePointer<Bool>) {
+                self.receivedDataFlag = receivedDataFlag
+                super.init()
+            }
+            func urlSession(_ session: URLSession,
+                            dataTask: URLSessionDataTask,
+                            didReceive data: Data) {
+                self.receivedDataFlag.pointee = true
+                guard let str = String(data: data, encoding: .utf8) else {
+                    XCTFail("Unable to convert data into string")
+                    return
+                }
+                Swift.print(str)
+            }
+        }
+        guard let server = LittleWebServerTests.getServer() else {
+            XCTFail("Unable to get server")
+            return
+        }
+        
+        var urlBase = (server.listeners[0] as! LittleWebServerTCPIPListener).url
+        if urlBase.host == "0.0.0.0" {
+            var urlString = urlBase.absoluteString
+            urlString = urlString.replacingOccurrences(of: "0.0.0.0", with: "127.0.0.1")
+            urlBase = URL(string: urlString)!
+        }
+        var didReceiveData: Bool = false
+        let delegate = DataTaskDelegate(&didReceiveData)
+        let session = URLSession(configuration: URLSessionConfiguration.default,
+                                 delegate: delegate,
+                                 delegateQueue: nil)
+        
+        let eventRequest = URLRequest(url: urlBase.appendingPathComponent("events"),
+                                      cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
+                                      timeoutInterval: .infinity)
+        
+        let task = session.dataTask(with: eventRequest)
+        task.resume()
+        
+        // We wait to allow streaming to occur
+        Thread.sleep(forTimeInterval: 20)
+        if task.state == .running {
+            // Lets stop the task if its still running
+            task.cancel()
+        }
+        
+        XCTAssertTrue(didReceiveData, "Did not receive any data from stream")
+        
+    }
+    
+    func testParallelRequests() {
+        let operations = OperationQueue()
+        // pause all operaions
+        operations.isSuspended = true
+        
+        guard let server = LittleWebServerTests.getServer() else {
+            XCTFail("Unable to get server")
+            return
+        }
+        
+        var urlBase = (server.listeners[0] as! LittleWebServerTCPIPListener).url
+        if urlBase.host == "0.0.0.0" {
+            var urlString = urlBase.absoluteString
+            urlString = urlString.replacingOccurrences(of: "0.0.0.0", with: "127.0.0.1")
+            urlBase = URL(string: urlString)!
+        }
+        let webLocation = urlBase.appendingPathComponent("status")
+        let parallelCount: Int = 5
+        var taskCompleted: [Bool] = [Bool](repeating: false, count: parallelCount)
+        for i in 0..<parallelCount {
+            operations.addOperation {
+                let session = URLSession(configuration: URLSessionConfiguration.default)
+                
+                let semaphore = DispatchSemaphore(value: 0)
+                Swift.print("[\(i)](\(webLocation.absoluteString)): Starting Request")
+                let task = session.dataTask(with: webLocation) { data, response, error in
+                    defer {
+                        Swift.print("[\(i)](\(webLocation.absoluteString)): Finished Request")
+                        semaphore.signal()
+                        taskCompleted[i] = true
+                    }
+                    if let e =  error {
+                        XCTFail("[\(i)](\(webLocation.absoluteString)): Request Failed with the following error: \(e)")
+                    }
+                    guard let d = data else {
+                        XCTFail("[\(i)](\(webLocation.absoluteString)): Request Failed. No data returned")
+                        return
+                    }
+                    guard d.count > 0 else {
+                        XCTFail("[\(i)](\(webLocation.absoluteString)): Request Failed. Data reutrned 0 bytes")
+                        return
+                    }
+                    
+                }
+                
+                task.resume()
+                semaphore.wait()
+            }
+        }
+        
+        // start operations
+        operations.maxConcurrentOperationCount = parallelCount
+        operations.isSuspended = false
+        
+        
+        // We wait until all tasks have returned
+        while !(taskCompleted.allSatisfy({ return $0 == true })) {
+            Thread.sleep(forTimeInterval: 1)
+        }
+        
+        
+    }
+    
+    func testMultiRequestConnection() {
+        guard let server = LittleWebServerTests.getServer() else {
+            XCTFail("Unable to get server")
+            return
+        }
+        
+        var urlBase = (server.listeners[0] as! LittleWebServerTCPIPListener).url
+        if urlBase.host == "0.0.0.0" {
+            var urlString = urlBase.absoluteString
+            urlString = urlString.replacingOccurrences(of: "0.0.0.0", with: "127.0.0.1")
+            urlBase = URL(string: urlString)!
+        }
+        let webLocation = urlBase.appendingPathComponent("status")
+        let session = URLSession(configuration: URLSessionConfiguration.default)
+        
+        for i in 0..<5 {
+            let semaphore = DispatchSemaphore(value: 0)
+            Swift.print("[\(i)](\(webLocation.absoluteString)): Starting Request")
+            let task = session.dataTask(with: webLocation) { data, response, error in
+                defer {
+                    Swift.print("[\(i)](\(webLocation.absoluteString)): Finished Request")
+                    semaphore.signal()
+                }
+                if let e =  error {
+                    XCTFail("[\(i)](\(webLocation.absoluteString)): Request Failed with the following error: \(e)")
+                }
+                guard let d = data else {
+                    XCTFail("[\(i)](\(webLocation.absoluteString)): Request Failed. No data returned")
+                    return
+                }
+                guard d.count > 0 else {
+                    XCTFail("[\(i)](\(webLocation.absoluteString)): Request Failed. Data reutrned 0 bytes")
+                    return
+                }
+                
+            }
+            
+            task.resume()
+            semaphore.wait()
+        }
     }
     
     
@@ -1706,7 +1875,7 @@ class LittleWebServerTests: XCExtenedTestCase {
                         var newPath = string
                         if !newPath.hasSuffix("/") { newPath += "/" }
                         newPath += sub
-                        let isValidSubRoute = try! generatePathAttributeList(for: newPath ,
+                        let isValidSubRoute = try! generatePathAttributeList(for: newPath,
                                                   availablePathAttributes: pathAtributes,
                                                   availableParameters: ["param2"],
                                                   availableParameterAttributes: paramAttributes) { string in
@@ -1768,6 +1937,9 @@ class LittleWebServerTests: XCExtenedTestCase {
         ("testBrowseSharedFolder", testBrowseSharedFolder),
         ("testWebSocket", testWebSocket),
         ("testObjectAccessing", testObjectAccessing),
+        ("testCustomResponse", testCustomResponse),
+        ("testParallelRequests", testParallelRequests),
+        ("testMultiRequestConnection", testMultiRequestConnection),
         ("testAddressValues", testAddressValues),
         ("testPathCondition", testPathCondition),
         ("testRoutePaths", testRoutePaths),
