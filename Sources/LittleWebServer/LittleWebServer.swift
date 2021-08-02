@@ -2112,6 +2112,7 @@ public extension LittleWebServer {
                 return rtn
             }
             
+            /*
             
             /// Parse a request
             /// - Parameters:
@@ -2398,7 +2399,7 @@ public extension LittleWebServer {
                              inputStream: usableInputStream)
                 
             }
-            
+            */
         }
         
         public class Response {
@@ -2433,6 +2434,7 @@ public extension LittleWebServer {
                 }
                 
             }
+            
             /// The HTTP Resposne Head (Status and Headers)
             public struct Head {
                 /// HTTP Resposne Code
@@ -3123,38 +3125,53 @@ public extension LittleWebServer {
                         self.count = UInt(range.count)
                     }
                 }
+                /// No body content
                 case empty
+                /// Regular data body content
                 case data(Data, contentType: ContentType?)
+                /// Any error catching will be done within the server and call the host internal error handler as the respones
+                case lazyData(() throws -> (content: Data, contentType: ContentType?))
+                /// FIle body content
                 case file(String,
                           contentType: ContentType?,
                           fileSize: UInt,
                           range: FileRange?,
                           speedLimit: LittleWebServer.FileTransferSpeedLimiter)
+                /// Text content
                 case text([TextComponent],
                           contentType: ContentType,
                           encoding: String.Encoding)
+                /// Custom body
                 case custom((LittleWebServerInputStream, LittleWebServerOutputStream) throws -> Void)
                 
-                
+                /// Indicator if the body is empty
                 public var isEmpty: Bool {
                     guard case .empty = self else { return false }
                     return true
                 }
                 
+                /// The path to the file for the body content IF
+                /// The body content is from a file
                 public var filePath: String? {
                     guard case .file(let rtn, contentType: _, fileSize: _, range: _, speedLimit: _) = self else { return nil }
                     return rtn
                 }
                 
+                /// The range of bytes within the file to return as the content IF
+                /// The body content is from a file
                 public var fileRange: FileRange? {
                     guard case .file(_, contentType: _, fileSize: _, range: let rtn, speedLimit: _) = self else { return nil }
                     return rtn
                 }
                 
+                /// The file size of the file used for the body content IF
+                /// The body content is from a file
                 public var fileSize: UInt? {
                     guard case .file(_, contentType: _, fileSize: let rtn, range: _, speedLimit: _) = self else { return nil }
                     return rtn
                 }
+                /// The file transfer limiter to use IF
+                /// The body content is from a file
                 public var fileTransferSpeedLimit: FileTransferSpeedLimiter? {
                     guard case .file(_, contentType: _, fileSize: _, range: _, speedLimit: let rtn) = self else { return nil }
                     return rtn
@@ -3164,7 +3181,7 @@ public extension LittleWebServer {
                     guard case .custom(let rtn) = self else { return nil }
                     return rtn
                 }
-                
+                /// The content type of the body if its a knowned before building the body
                 public var contentType: ContentType? {
                     switch self {
                     case .data(_, contentType: let rtn):
@@ -3179,75 +3196,82 @@ public extension LittleWebServer {
                 }
                 
                 internal func content(in controller: Routing.Requests.RouteController,
-                                      on server: LittleWebServer) throws -> (content: Data?, length: UInt)? {
+                                      on server: LittleWebServer) throws -> (content: Data?,
+                                                                             length: UInt,
+                                                                             contentType: ContentType?)? {
                     switch self {
-                    case.custom(_): return nil
-                    case .empty: return (content: Data(), length: 0)
-                    case .data(let dta, contentType: _):
-                        return (content: dta, length: UInt(dta.count))
-                    case .text(let components, contentType: let ctType, encoding: let enc):
-                        var length: UInt = 0
-                        var content = Data()
-                        
-                        for component in components {
-                            switch component {
-                            case .text(var txt):
-                                if ctType.isAnyHTML {
-                                    // Change all \r\n to \r so that when we try and do
-                                    // a general fix of replacing \r to \r\n it won't
-                                    // break any proper \r\n
-                                    txt = txt.replacingOccurrences(of: "\r\n", with: "\n")
-                                    txt = txt.replacingOccurrences(of: "\n", with: "\r\n")
-                                }
-                                guard let dta = txt.data(using: enc) else {
-                                    throw WebServerError.invalidStringToDataEncoding(txt, encoding: enc)
-                                }
-                                content.append(dta)
-                                length += UInt(dta.count)
-                            case .include(contextPath: let pth, queryItems: let query):
-                                //let currentRequest = Thread.current.currentLittleWebServerRequest!
-                                let currentRequest = Thread.current.littleWebServerDetails.request!
-                                let includeRequest = HTTP.Request.init(currentRequest,
-                                                                       newMethod: .get,
-                                                                       newContextPath: pth,
-                                                                       newUrlQuery: nil,
-                                                                       newQueryItem: query)
-                                /*let includeRequest = HTTP.Request.init(scheme: currentRequest.scheme,
-                                                                  method: .get,
-                                                                  contextPath: pth,
-                                                                  queryPath: nil,
-                                                                  version: currentRequest.version,
-                                                                  headers: currentRequest.headers,
-                                                                  queryItems: query,
-                                                                  session: currentRequest.getSession(),
-                                                                  isNewSession: currentRequest.isNewSession)*/
-                                
-                                
-                                let resp = try controller.processRequest(for: includeRequest,
-                                                                     on: server)
-                                  
-                                if let ct = try resp.body.content(in: controller, on: server) {
-                                    if let dt = ct.content {
-                                        content.append(dt)
-                                        length += ct.length
-                                    } else if (resp.headers.contentType?.isText ?? false)  {
-                                        fatalError("Current including files is not supported.")
-                                    } else {
-                                        fatalError("Current including files is not supported")
+                        case.custom(_): return nil
+                        case .empty: return (content: Data(), length: 0, contentType: nil)
+                        case .data(let dta, contentType: let ct):
+                            return (content: dta, length: UInt(dta.count), contentType: ct)
+                        case .lazyData(let fnc):
+                            let rtn = try fnc()
+                            return (content: rtn.content,
+                                    length: UInt(rtn.content.count),
+                                    contentType: rtn.contentType)
+                        case .text(let components, contentType: let ctType, encoding: let enc):
+                            var length: UInt = 0
+                            var content = Data()
+                            
+                            for component in components {
+                                switch component {
+                                case .text(var txt):
+                                    if ctType.isAnyHTML {
+                                        // Change all \r\n to \r so that when we try and do
+                                        // a general fix of replacing \r to \r\n it won't
+                                        // break any proper \r\n
+                                        txt = txt.replacingOccurrences(of: "\r\n", with: "\n")
+                                        txt = txt.replacingOccurrences(of: "\n", with: "\r\n")
                                     }
+                                    guard let dta = txt.data(using: enc) else {
+                                        throw WebServerError.invalidStringToDataEncoding(txt, encoding: enc)
+                                    }
+                                    content.append(dta)
+                                    length += UInt(dta.count)
+                                case .include(contextPath: let pth, queryItems: let query):
+                                    //let currentRequest = Thread.current.currentLittleWebServerRequest!
+                                    let currentRequest = Thread.current.littleWebServerDetails.request!
+                                    let includeRequest = HTTP.Request.init(currentRequest,
+                                                                           newMethod: .get,
+                                                                           newContextPath: pth,
+                                                                           newUrlQuery: nil,
+                                                                           newQueryItem: query)
+                                    /*let includeRequest = HTTP.Request.init(scheme: currentRequest.scheme,
+                                                                      method: .get,
+                                                                      contextPath: pth,
+                                                                      queryPath: nil,
+                                                                      version: currentRequest.version,
+                                                                      headers: currentRequest.headers,
+                                                                      queryItems: query,
+                                                                      session: currentRequest.getSession(),
+                                                                      isNewSession: currentRequest.isNewSession)*/
+                                    
+                                    
+                                    let resp = try controller.processRequest(for: includeRequest,
+                                                                         on: server)
+                                      
+                                    if let ct = try resp.body.content(in: controller, on: server) {
+                                        if let dt = ct.content {
+                                            content.append(dt)
+                                            length += ct.length
+                                        } else if (resp.headers.contentType?.isText ?? false)  {
+                                            fatalError("Current including files is not supported.")
+                                        } else {
+                                            fatalError("Current including files is not supported")
+                                        }
+                                    }
+                                   
                                 }
-                               
                             }
-                        }
-                        
-                        return (content: content, length: length)
-                        
-                    case .file(_ , contentType: _, fileSize: let fileSize, range: let rng, speedLimit: _):
-                        if let range = rng {
-                            return (content: nil, length: UInt(range.count))
-                        } else {
-                            return (content: nil, length: fileSize)
-                        }
+                            
+                            return (content: content, length: length, contentType: ctType)
+                            
+                        case .file(_ , contentType: let ct, fileSize: let fileSize, range: let rng, speedLimit: _):
+                            if let range = rng {
+                                return (content: nil, length: UInt(range.count), contentType: ct)
+                            } else {
+                                return (content: nil, length: fileSize, contentType: ct)
+                            }
                     }
                 }
             }
@@ -3274,8 +3298,6 @@ public extension LittleWebServer {
                 self.head = head
                 self.body = body
             }
-            
-            
         }
     }
 }
@@ -4619,12 +4641,26 @@ public class LittleWebServer {
     
     public enum RequestResponseEvent {
         case incomminRequest(HTTP.Request)
+        case hoppingProcessingQueue(HTTP.Response.Details, for: HTTP.Request?)
         case outgoingResposne(HTTP.Response.Details, for: HTTP.Request?)
+    }
+    
+    public enum ServerEvent {
+        public enum ClientDisconnectReason {
+            case normal
+            case badRequest(String?)
+            case readRequestTimedOut
+        }
+        case clientConnected(LittleWebServerClientDetails)
+        case clientDisconnected(LittleWebServerClientDetails, ClientDisconnectReason)
+        case requestEvent(LittleWebServerClientDetails, RequestResponseEvent)
     }
     
     private let httpCommunicator: LittleWebServerHTTPCommunicator
     //public var httpVersion: HTTP.Version { return self.httpCommunicator.httpVersion }
     public var serverHeader: String?
+    
+    public var temporaryFileUploadLocation: URL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("LittleWebServer")
     
     internal static let dateHeaderFormatter: DateFormatter = {
         var rtn = DateFormatter()
@@ -4656,6 +4692,12 @@ public class LittleWebServer {
     public var serverErrorHandler: ((TrackableError) -> Void)? = nil
     
     public var allowConnection: ((_ connection: LittleWebServerClient) -> Bool) = { _ in return true }
+    
+    public var serverEventHandlerQueue = DispatchQueue(label: "LittleWebServer.serverEventHandlerQueue.async")
+    
+    public var serverEventHandler: ((LittleWebServer, ServerEvent) -> Void)? = nil
+    
+    
     
     private let requestResponseEventHandlerQueue = DispatchQueue(label: "LittleWebServer.requestResponseEventHandler.async")
     public var requestResponseEventHandler: ((RequestResponseEvent) -> Void)? = nil
@@ -5103,7 +5145,7 @@ public class LittleWebServer {
                                                from: listener,
                                                server: self,
                                                sessionManager: self.sessionManager,
-                                               signalRequestResponseEvent: self.signalRequestResponseEvent(_:),
+                                               signalServerEvent: self.signalServerEvent,
                                                signalServerError: self.signalServerError(error:file:line:))
     }
     
@@ -5132,13 +5174,23 @@ public class LittleWebServer {
         signalServerError(tError)
     }
     #endif
+    
+    internal func signalServerEvent(_ event: ServerEvent) {
+        guard let handler = self.serverEventHandler else { return }
+        self.serverEventHandlerQueue.async {
+            handler(self, event)
+        }
+    }
+    
+    /*
     /// Signals a request response event calling requestResponseEventHandler
-    internal func signalRequestResponseEvent(_ event: RequestResponseEvent) {
+    internal func signalRequestResponseEvent(_ connection: LittleWebServerClient,_ event: RequestResponseEvent) {
+        self.signalServerEvent(.requestEvent(event))
         self.requestResponseEventHandlerQueue.async {
             self.requestResponseEventHandler?(event)
         }
     }
-    
+    */
     
     
     /// Get the content type of a resource with the given extension
@@ -5295,6 +5347,10 @@ public extension LittleWebServer.HTTP.Response.Head {
     static func badRequest(headers: LittleWebServer.HTTP.Response.Headers = .init()) -> LittleWebServer.HTTP.Response.Head {
         return .init(responseCode: 400, message: "Bad Request", headers: headers)
     }
+    /// HTTP Unauthorized (401)
+    static func unauthorized(headers: LittleWebServer.HTTP.Response.Headers = .init()) -> LittleWebServer.HTTP.Response.Head {
+        return .init(responseCode: 401, message: "Unauthorized", headers: headers)
+    }
     /// HTTP Forbidden (403)
     static func forbidden(headers: LittleWebServer.HTTP.Response.Headers = .init()) -> LittleWebServer.HTTP.Response.Head {
         return .init(responseCode: 403, message: "Forbidden", headers: headers)
@@ -5382,34 +5438,50 @@ public extension LittleWebServer.HTTP.Response.Body {
     ///   - encoder: The encoder used to encode the object
     /// - Returns: Returns a new JSON Response Body
     static func json<T: Encodable>(_ encodable: T,
-                                   encoder: JSONEncoder? = nil) throws -> LittleWebServer.HTTP.Response.Body {
-        let enc = encoder ?? JSONEncoder()
-        let dta = try enc.encode(encodable)
+                                   encoder: JSONEncoder = JSONEncoder()) throws -> LittleWebServer.HTTP.Response.Body {
+        let dta = try encoder.encode(encodable)
         return .data(dta, contentType: .json)
+    }
+    /// Create new lazy JSON Response Body
+    ///
+    /// Any error catching will be done within the server and call the host internal error handler as the respones
+    ///
+    /// - Parameters:
+    ///   - encodable: The encodable object to encode into JSON
+    ///   - encoder: The encoder used to encode the object
+    /// - Returns: Returns a new JSON Response Body
+    static func lazyJson<T: Encodable>(_ encodable: T,
+                                       encoder: JSONEncoder = JSONEncoder()) throws -> LittleWebServer.HTTP.Response.Body {
+        return .lazyData({ () throws -> (content: Data,
+                                         contentType: LittleWebServer.HTTP.Headers.ContentType?) in
+            let dta = try encoder.encode(encodable)
+            return (content: dta, contentType: .json)
+        })
+       
     }
 }
 
 public extension LittleWebServer.HTTP.Response {
     /// HTTP OK (200)
     static func ok(writeQueue: ProcessQueue = .current,
-                          headers: Headers = .init(),
-                          body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                   headers: Headers = .init(),
+                   body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                      head: .ok(headers: headers),
                      body: body)
     }
     /// HTTP Created (201)
     static func created(writeQueue: ProcessQueue = .current,
-                               headers: Headers = .init(),
-                               body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                        headers: Headers = .init(),
+                        body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                      head: .created(headers: headers),
                      body: body)
     }
     /// HTTP Accepted (202)
     static func accepted(writeQueue: ProcessQueue = .current,
-                               headers: Headers = .init(),
-                               body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                         headers: Headers = .init(),
+                         body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                      head: .accepted(headers: headers),
                      body: body)
@@ -5423,16 +5495,16 @@ public extension LittleWebServer.HTTP.Response {
     }
     /// HTTP Partial Content (206)
     static func partialContent(writeQueue: ProcessQueue = .current,
-                                      headers: Headers = .init(),
-                                      body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                               headers: Headers = .init(),
+                               body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                      head: .partialContent(headers: headers),
                      body: body)
     }
     /// HTTP Not Modified (304)
     static func notModified(writeQueue: ProcessQueue = .current,
-                                   headers: Headers = .init(),
-                                   body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                            headers: Headers = .init(),
+                            body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                      head: .notModified(headers: headers),
                      body: body)
@@ -5448,73 +5520,81 @@ public extension LittleWebServer.HTTP.Response {
     }
     /// HTTP Forbidden (403)
     static func forbidden(writeQueue: ProcessQueue = .current,
-                                headers: Headers = .init(),
-                                body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                          headers: Headers = .init(),
+                          body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                      head: .forbidden(headers: headers),
                      body: body)
     }
     /// HTTP Not Found (404)
     static func notFound(writeQueue: ProcessQueue = .current,
-                                headers: Headers = .init(),
-                                body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                         headers: Headers = .init(),
+                         body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                      head: .notFound(headers: headers),
                      body: body)
     }
     /// HTTP Not Accepted (406)
     static func notAccepted(writeQueue: ProcessQueue = .current,
-                                   headers: Headers = .init(),
-                                   body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                            headers: Headers = .init(),
+                            body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                         head: .notAccepted(headers: headers),
                         body: body)
     }
     /// HTTP Request Timeout (408)
     static func requestTimeout(writeQueue: ProcessQueue = .current,
-                                      headers: Headers = .init(),
-                                      body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                               headers: Headers = .init(),
+                               body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                         head: .requestTimeout(headers: headers),
                         body: body)
     }
     /// HTTP Length Required (411)
     static func lengthRequired(writeQueue: ProcessQueue = .current,
-                                      headers: Headers = .init(),
-                                      body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                               headers: Headers = .init(),
+                               body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                      head: .lengthRequired(headers: headers),
                      body: body)
     }
     /// HTTP Precondition Failed (412)
     static func preconditionFailed(writeQueue: ProcessQueue = .current,
-                                          headers: Headers = .init(),
-                                          body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                                   headers: Headers = .init(),
+                                   body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                      head: .preconditionFailed(headers: headers),
                      body: body)
     }
     /// HTTP Unsupported Media Type (415)
     static func unsupportedMediaType(writeQueue: ProcessQueue = .current,
-                                            headers: Headers = .init(),
-                                            body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                                     headers: Headers = .init(),
+                                     body: Body = .empty) -> LittleWebServer.HTTP.Response {
           return .init(writeQueue: writeQueue,
                        head: .unsupportedMediaType(headers: headers),
                        body: body)
     }
     /// HTTP Bad Request (400)
     static func badRequest(writeQueue: ProcessQueue = .current,
-                                  headers: Headers = .init(),
-                                  body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                           headers: Headers = .init(),
+                           body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                      head: .badRequest(headers: headers),
                      body: body)
     }
+    /// Unauthorized (401)
+    static func unauthorized(writeQueue: ProcessQueue = .current,
+                             headers: Headers = .init(),
+                             body: Body = .empty) -> LittleWebServer.HTTP.Response {
+        return .init(writeQueue: writeQueue,
+                     head: .unauthorized(headers: headers),
+                     body: body)
+    }
     /// HTTP Temporarily Movied (302)
     static func temporarilyMoved(location: String,
-                                        writeQueue: ProcessQueue = .current,
-                                        headers: Headers = .init(),
-                                        body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                                 writeQueue: ProcessQueue = .current,
+                                 headers: Headers = .init(),
+                                 body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                      head: .temporarilyMoved(location: location, headers: headers),
                      body: body)
@@ -5522,17 +5602,17 @@ public extension LittleWebServer.HTTP.Response {
     }
     /// HTTP Moved Permanently (301)
     static func permanentlyMoved(location: String,
-                                        writeQueue: ProcessQueue = .current,
-                                        headers: Headers = .init(),
-                                        body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                                 writeQueue: ProcessQueue = .current,
+                                 headers: Headers = .init(),
+                                 body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                      head: .permanentlyMoved(location: location, headers: headers),
                      body: body)
     }
     /// HTTP Internal Error (500)
     static func internalError(writeQueue: ProcessQueue = .current,
-                                     headers: Headers = .init(),
-                                     body: Body = .empty) -> LittleWebServer.HTTP.Response {
+                              headers: Headers = .init(),
+                              body: Body = .empty) -> LittleWebServer.HTTP.Response {
         return .init(writeQueue: writeQueue,
                      head: .internalError(headers: headers),
                      body: body)
