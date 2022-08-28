@@ -7,6 +7,7 @@
 
 import Foundation
 import Dispatch
+import SynchronizeObjects
 
 internal extension LittleWebServer {
     /// The default session manager.  Used for containing clients sessions
@@ -57,8 +58,7 @@ internal extension LittleWebServer {
         
         
         public var sessionTimeOutLimit: TimeInterval = 600.0 // 10 min
-        private let sessionsSync = DispatchQueue(label: "LittleWebServer.DefaultSessionManager.sessions.sync")
-        private var sessions: [Session] = []
+        private let sessions: SyncLockObj<[Session]> = .init(value: [])
         private let sessionInvalidatorQueueRepeatTime: TimeInterval = 60.0
         private let sessionInvalidatorQueue = DispatchQueue(label: "LittleWebServer.DefaultSessionManager.sessionInvalidatorQueue", qos: .background)
         
@@ -72,12 +72,13 @@ internal extension LittleWebServer {
         }
         
         private func checkSessions() {
-            self.sessionsSync.sync {
-                var index = self.sessions.startIndex
-                while index < self.sessions.endIndex  {
-                    let session = self.sessions[index]
+            self.sessions.lockingForWithValue { ptr in
+            
+                var index = ptr.pointee.startIndex
+                while index < ptr.pointee.endIndex  {
+                    let session = ptr.pointee[index]
                     if Date().timeIntervalSince(session.lastModified) > self.sessionTimeOutLimit {
-                        self.sessions.remove(at: index)
+                        ptr.pointee.remove(at: index)
                         let copySession = Session(copy: session)
                         self.eventHandlersQueue.async {
                             self.sessionExpiredEventHandler?(copySession)
@@ -86,10 +87,11 @@ internal extension LittleWebServer {
                         }
                         session.invalidate()
                     } else {
-                        index = self.sessions.index(after: index)
+                        index = ptr.pointee.index(after: index)
                     }
                 }
             }
+            
         }
         
         private func scheduleSessionChecker() {
@@ -102,15 +104,12 @@ internal extension LittleWebServer {
         
         public func createSession() -> LittleWebServerSession {
             let rtn = Session()
-            self.sessionsSync.sync {
-                self.sessions.append(rtn)
-            }
+            self.sessions.append(rtn)
             return rtn
         }
         
         public func getSession(withId id: String) -> LittleWebServerSession? {
-            let first = self.sessionsSync.sync { return self.sessions.first(where: { return $0.id == id }) }
-            guard let rtn = first else {
+            guard let rtn = self.sessions.first(where: { return $0.id == id }) else {
                 return nil
             }
             rtn.lastModified = Date()
@@ -119,10 +118,11 @@ internal extension LittleWebServer {
         
         public func findSession(withIds ids: [String]) -> LittleWebServerSession? {
             guard ids.count > 0 else { return nil }
-            let first = self.sessionsSync.sync { return self.sessions.first(where: { return ids.contains($0.id) }) }
-            guard let rtn = first else {
+            
+            guard let rtn = self.sessions.first(where: { return ids.contains($0.id) }) else {
                 return nil
             }
+            
             rtn.lastModified = Date()
             return rtn
         }
@@ -130,19 +130,18 @@ internal extension LittleWebServer {
         public func saveSession(_ session: LittleWebServerSession) {
             guard let s = session as? Session else { return }
             s.lastModified = Date()
-            self.sessionsSync.sync {
-                if !self.sessions.contains(where: { return $0.id == s.id}) {
-                    self.sessions.append(s)
+            
+            self.sessions.lockingForWithValue { ptr in
+                if !ptr.pointee.contains(where: { return $0.id == s.id }) {
+                    ptr.pointee.append(s)
                 }
             }
         }
         
         public func removeSession(withId id: String) {
-            self.sessionsSync.sync {
-                self.sessions.removeAll(where: { session in
-                    guard session.id == id else {
-                        return false
-                    }
+            self.sessions.lockingForWithValue { ptr in
+                ptr.pointee.removeAll { session in
+                    guard session.id == id else { return false }
                     let copySession = Session(copy: session)
                     self.eventHandlersQueue.async {
                         self.invalidatingSessionEventHandler?(copySession)
@@ -150,7 +149,7 @@ internal extension LittleWebServer {
                     }
                     session.invalidate()
                     return true
-                })
+                }
             }
         }
     }
