@@ -97,7 +97,7 @@ public extension LittleWebServer {
     ///   - listeners: A list of listeners the web server will be listening on
     ///   - maxRequestWorkerCount: The maximum number of workers to use for generate requests.  -1 equals no limit, 0 will stop pause anymore processing
     ///   - maxWorkerQueueCounts: The max number of workers for all the different worker queues. 1 equals no limit, 0 will stop pause anymore processing
-    convenience init(_ listeners: [LittleWebServerListener] = [],
+    convenience init(_ listeners: [LittleWebServerListener],
                      maxRequestWorkerCount: Int = LittleWebServer.DEFAULT_WORKER_COUNT,
                      maxWorkerQueueCounts: [LittleWebServer.WorkerQueue: Int] = [:]) {
         self.init(listeners,
