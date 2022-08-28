@@ -7,6 +7,7 @@
 
 import Foundation
 import Dispatch
+import SynchronizeObjects
 
 
 /// A base for any Socket listener
@@ -17,12 +18,9 @@ open class LittleWebServerSocketListener: LittleWebServerSocketConnection,
     public static let DEFAULT_MAX_BACK_LOG_SIZE: Int32 = 127
     
     
-    private let isListenerLock = NSLock()
-    private var _isListening: Bool = false
+    private let _isListening: SyncLockObj<Bool> = .init(value: false)
     open var isListening: Bool {
-        self.isListenerLock.lock()
-        defer { self.isListenerLock.unlock() }
-        return self._isListening
+        return self._isListening.value
     }
     
     open var uid: String { fatalError("Must be implemented in child class") }
@@ -171,37 +169,35 @@ open class LittleWebServerSocketListener: LittleWebServerSocketConnection,
     }
     
     open func startListening() throws {
-        self.isListenerLock.lock()
-        defer { self.isListenerLock.unlock() }
-        
-        guard !self._isListening else { return }
-        
-        #if os(Linux)
-        let ret = Glibc.listen(self.socketDescriptor, self.maxBacklogSize)
-        #else
-        let ret = Darwin.listen(self.socketDescriptor, self.maxBacklogSize)
-        #endif
-        if ret < 0 {
-            throw SocketError.socketListeningFailed(systemError: .current())
+        try self._isListening.lockingForWithValue { ptr in
+            guard !ptr.pointee else { return }
+            
+            #if os(Linux)
+            let ret = Glibc.listen(self.socketDescriptor, self.maxBacklogSize)
+            #else
+            let ret = Darwin.listen(self.socketDescriptor, self.maxBacklogSize)
+            #endif
+            if ret < 0 {
+                throw SocketError.socketListeningFailed(systemError: .current())
+            }
+            ptr.pointee = true
+            
         }
-        
-        self._isListening = true
         
     }
     
     open func stopListening() {
-        self.isListenerLock.lock()
-        defer { self.isListenerLock.unlock() }
-        
-        guard self._isListening else { return }
-        
-        #if os(Linux)
-            _ = Glibc.shutdown(self.socketDescriptor, Int32(SHUT_RDWR))
-        #else
-            _ = Darwin.shutdown(self.socketDescriptor, Int32(SHUT_RDWR))
-        #endif
-        self._isListening = false
-        
+        self._isListening.lockingForWithValue { ptr in
+            guard ptr.pointee else { return }
+            
+            #if os(Linux)
+                _ = Glibc.shutdown(self.socketDescriptor, Int32(SHUT_RDWR))
+            #else
+                _ = Darwin.shutdown(self.socketDescriptor, Int32(SHUT_RDWR))
+            #endif
+            ptr.pointee = false
+            
+        }
         
     }
     
@@ -230,6 +226,7 @@ open class LittleWebServerSocketListener: LittleWebServerSocketConnection,
         
         var keepTrying: Bool = true
         repeat {
+            //print("Trying to accept incomming connection")
             do {
                 guard let acceptAddress = try Address.init(addressProvider: { (addressPointer, addressLengthPointer) in
                     #if os(Linux)
@@ -276,7 +273,7 @@ open class LittleWebServerSocketListener: LittleWebServerSocketConnection,
             
             throw SocketError.socketUnabletToLoadClientSocket
         }
-        
+        //print("Accepted \(clientSocket)")
         return (socket: clientSocket, address: clientAddress!)
     }
     
