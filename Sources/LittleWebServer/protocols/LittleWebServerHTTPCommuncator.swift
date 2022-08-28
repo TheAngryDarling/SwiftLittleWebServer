@@ -11,13 +11,14 @@ import Foundation
 /// A protocol defining A HTTP Communicator like HTTP 1.1
 /// This allows chaning the HTTP Communicator for different HTTP versions
 public protocol LittleWebServerHTTPCommunicator: AnyObject {
-    //var httpVersion: LittleWebServer.HTTP.Version { get }
     /// The max number of workers to allow accross the different worker queues
     var maxTotalWorkerCount: Int { get set }
     /// The total number of running workers at any given moment
     var totalWorkerCount: UInt { get }
     /// Dictionary of the max number of workers allowed for each worker queue
     var maxWorkerCounts: [LittleWebServer.WorkerQueue: Int] { get set }
+    /// The amount of time to wailt while stopping a thread before killing it
+    var threadStopTimeout: TimeInterval { get set }
     
     /// Handler for an incomming connection
     /// - Parameters:
@@ -45,6 +46,9 @@ public protocol LittleWebServerHTTPCommunicator: AnyObject {
     ///   - server: The server the woker queue is on
     func waitForQueueToBeAvailable(queue: LittleWebServer.WorkerQueue,
                                    on server: LittleWebServer)
+    
+    /// Method to tell the communicator that the server is shutting down
+    func serverStopping()
 }
 #else
 /// A protocol defining A HTTP Communicator like HTTP 1.1
@@ -57,6 +61,8 @@ public protocol LittleWebServerHTTPCommunicator: class {
     var totalWorkerCount: UInt { get }
     /// Dictionary of the max number of workers allowed for each worker queue
     var maxWorkerCounts: [LittleWebServer.WorkerQueue: Int] { get set }
+    /// The amount of time to wailt while stopping a thread before killing it
+    var threadStopTimeout: TimeInterval { get set }
     
     /// Handler for an incomming connection
     /// - Parameters:
@@ -84,5 +90,8 @@ public protocol LittleWebServerHTTPCommunicator: class {
     ///   - server: The server the woker queue is on
     func waitForQueueToBeAvailable(queue: LittleWebServer.WorkerQueue,
                                    on server: LittleWebServer)
+    
+    /// Method to tell the communicator that the server is shutting down
+    func serverStopping()
 }
 #endif
