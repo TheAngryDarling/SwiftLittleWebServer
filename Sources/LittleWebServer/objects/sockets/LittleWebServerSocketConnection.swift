@@ -7,6 +7,7 @@
 
 import Foundation
 import Dispatch
+import SynchronizeObjects
 
 
 public extension LittleWebServerSocketConnection {
@@ -833,22 +834,20 @@ extension LittleWebServerSocketConnection.Address {
 
 
 
-open class LittleWebServerSocketConnection {
+open class LittleWebServerSocketConnection: NSObject {
     /// Representation of an invalid socket descriptor
     public static let SOCKET_INVALID_DESCRIPTOR: SocketDescriptor = -1
-    /// Locking mechanism for accessign the socket descriptor
-    private let socketDescriptorSyncLock = DispatchQueue(label: "SocketConnection._socketDescriptor.sync")
     
-    /// The current socket descriptor of the connection
-    private var _socketDescriptor: SocketDescriptor = LittleWebServerSocketConnection.SOCKET_INVALID_DESCRIPTOR
+    
+    private let _socketDescriptor: SyncLockObj<SocketDescriptor>
     /// The current socket descriptor of the connection
     public var socketDescriptor: SocketDescriptor {
-        return self.socketDescriptorSyncLock.sync { return self._socketDescriptor }
+        return self._socketDescriptor.value
     }
     /// Indicator if the current socket is connected
     open var isConnected: Bool {
-        return self.socketDescriptorSyncLock.sync {
-            return self._socketDescriptor != LittleWebServerSocketConnection.SOCKET_INVALID_DESCRIPTOR
+        return self._socketDescriptor.lockingForWithValue { ptr in
+            return ptr.pointee != LittleWebServerSocketConnection.SOCKET_INVALID_DESCRIPTOR
         }
     }
     /// Indicator if the current socket is listening (is a server socket)
@@ -882,9 +881,10 @@ open class LittleWebServerSocketConnection {
     /// This init will enable SO_NOSIGPIPE on the socket
     /// - Parameter socketDescriptor: The socket descriptor
     internal init(_ socketDescriptor: SocketDescriptor) throws {
-        self._socketDescriptor = socketDescriptor
+        self._socketDescriptor = .init(value: socketDescriptor)
+        super.init()
         do {
-            try LittleWebServerSocketConnection.setupNoSigPip(self._socketDescriptor)
+            try LittleWebServerSocketConnection.setupNoSigPip(socketDescriptor)
         } catch {
             self.close()
             throw error
@@ -896,11 +896,13 @@ open class LittleWebServerSocketConnection {
     ///   - family: The socket family (eg unix, inet4, inet6)
     ///   - proto: The socket protocol (eg, tcp or unix)
     internal init(family: AddressFamily, proto: AddressProtocol) throws {
-        self._socketDescriptor = try LittleWebServerSocketConnection.newStreamSocket(family: family,
-                                                                 proto: proto)
+        let sd = try LittleWebServerSocketConnection.newStreamSocket(family: family,
+                                                                     proto: proto)
+        self._socketDescriptor = .init(value: sd)
+        super.init()
         
         do {
-            try LittleWebServerSocketConnection.setupNoSigPip(self._socketDescriptor)
+            try LittleWebServerSocketConnection.setupNoSigPip(sd)
         } catch {
             self.close()
             throw error
@@ -910,11 +912,12 @@ open class LittleWebServerSocketConnection {
     /// Create a new socket with the given address information
     /// - Parameter address: The address information used to create the socket
     internal init(address: Address) throws {
-        self._socketDescriptor = try LittleWebServerSocketConnection.newStreamSocket(family: address.family,
-                                                                 proto: address.proto)
-        
+        let sd = try LittleWebServerSocketConnection.newStreamSocket(family: address.family,
+                                                                     proto: address.proto)
+        self._socketDescriptor = .init(value: sd)
+        super.init()
         do {
-            try LittleWebServerSocketConnection.setupNoSigPip(self._socketDescriptor)
+            try LittleWebServerSocketConnection.setupNoSigPip(sd)
         } catch {
             self.close()
             throw error
@@ -928,13 +931,12 @@ open class LittleWebServerSocketConnection {
     
     /// Closes the socket
     open func close() {
-        self.socketDescriptorSyncLock.sync {
-            guard self._socketDescriptor != LittleWebServerSocketConnection.SOCKET_INVALID_DESCRIPTOR else {
+        self._socketDescriptor.lockingForWithValue { ptr in
+            guard ptr.pointee != LittleWebServerSocketConnection.SOCKET_INVALID_DESCRIPTOR else {
                 return
             }
-            //print("Closing Socket(\(type(of: self))) \(self._socketDescriptor)")
-            LittleWebServerSocketConnection.closeSocket(self._socketDescriptor)
-            self._socketDescriptor = LittleWebServerSocketConnection.SOCKET_INVALID_DESCRIPTOR
+            LittleWebServerSocketConnection.closeSocket(ptr.pointee)
+            ptr.pointee = LittleWebServerSocketConnection.SOCKET_INVALID_DESCRIPTOR
         }
     }
     
