@@ -14,7 +14,8 @@ internal extension URL {
         var resourceKeys: [FileAttributeKey : Any] = [:]
         var isDir: Bool? = nil
         var isD: Bool = false
-        if manager.fileExists(atPath: self.path, isDirectory: &isD) {
+        if manager._fileExists(atPath: self.path,
+                               isDirectory: &isD) {
             isDir = isD
             resourceKeys = try manager.attributesOfItem(atPath: self.path)
         }
