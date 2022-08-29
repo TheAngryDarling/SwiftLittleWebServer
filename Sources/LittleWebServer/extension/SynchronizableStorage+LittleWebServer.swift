@@ -15,3 +15,10 @@ internal extension SynchronizableObject where Storage: Collection, Storage.Eleme
         }
     }
 }
+internal extension SynchronizableObject where Storage == [Thread] {
+    func remove(_ thread: Thread) {
+        self.lockingForWithValue { ptr in
+            ptr.pointee.removeAll(where: { return $0 == thread })
+        }
+    }
+}
