@@ -152,6 +152,12 @@ internal extension Array where Element == URLQueryItem {
     }
 }
 
+internal extension Array where Element: LittleWebServer.Routing.RouteBase {
+    mutating func sortRoutes() {
+        self.sort(by: { return $0.condition.pathCondition < $1.condition.pathCondition })
+    }
+}
+
 #if !swift(>=4.2)
 internal extension Array {
     mutating func removeAll(where condition: (Element) -> Bool) {
@@ -186,7 +192,10 @@ internal extension Array {
 }
 internal extension Array where Element: Equatable {
     func firstIndex(of element: Element) -> Index? {
-        return self.firstIndex(where: { return $0 == element })
+        for (index, e) in self.enumerated() {
+            if e == element { return index }
+        }
+        return nil
     }
 }
 #endif
