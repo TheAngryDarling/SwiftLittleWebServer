@@ -6,6 +6,7 @@
 //
 
 import Foundation
+
 /// Representation of a client Socket Connection
 open class LittleWebServerClientSocket: LittleWebServerSocketConnection,
                                         LittleWebServerClient,
