@@ -381,7 +381,7 @@ import Glibc
       ///   - generator: The random number generator to use when creating the
       ///     new random value.
       /// - Returns: A random value within the bounds of `range`.
-      public static func random<T: RandomNumberGenerator>(
+      internal static func random<T: RandomNumberGenerator>(
         in range: Range<Self>,
         using generator: inout T
       ) -> Self {
@@ -479,7 +479,7 @@ import Glibc
       ///   - generator: The random number generator to use when creating the
       ///     new random value.
       /// - Returns: A random value within the bounds of `range`.
-      public static func random<T: RandomNumberGenerator>(
+      internal static func random<T: RandomNumberGenerator>(
         in range: ClosedRange<Self>,
         using generator: inout T
       ) -> Self {
