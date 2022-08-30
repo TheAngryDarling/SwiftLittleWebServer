@@ -261,12 +261,14 @@ public extension LittleWebServer {
                 var errorResponseEvent: ErrorResponseEvent = .objectGetter
                 let encoder = self.pickEncoder(from: encoders, using: request)
                 do {
-                    let obj = try handler(request)
-                    errorResponseEvent = .encoding
-                    
-                    let dta = try encoder.encode(obj)
-                    return LittleWebServer.HTTP.Response.ok(body: .data(dta,
-                                                                        contentType: encoder.littleWebServerContentType))
+                    return try autoreleasepool {
+                        let obj = try handler(request)
+                        errorResponseEvent = .encoding
+                        
+                        let dta = try encoder.encode(obj)
+                        return LittleWebServer.HTTP.Response.ok(body: .data(dta,
+                                                                            contentType: encoder.littleWebServerContentType))
+                    }
                 } catch {
                     return self.generateErrorResponse(request: request,
                                                       handler: errorResponse,
@@ -423,17 +425,19 @@ public extension LittleWebServer {
                 
                 var errorResponseEvent: ErrorResponseEvent = .objectGetter
                 do {
-                    guard let obj = try handler(request, objectId) else {
-                        return self.generateNotFoundResponse(request: request,
-                                                             handler: notFoundResponse,
-                                                             stringId: sid,
-                                                             objectId: objectId,
-                                                             encoder: encoder)
+                    return try autoreleasepool {
+                        guard let obj = try handler(request, objectId) else {
+                            return self.generateNotFoundResponse(request: request,
+                                                                 handler: notFoundResponse,
+                                                                 stringId: sid,
+                                                                 objectId: objectId,
+                                                                 encoder: encoder)
+                        }
+                        errorResponseEvent = .encoding
+                        let dta = try encoder.encode(obj)
+                        return LittleWebServer.HTTP.Response.ok(body: .data(dta,
+                                                                            contentType: encoder.littleWebServerContentType))
                     }
-                    errorResponseEvent = .encoding
-                    let dta = try encoder.encode(obj)
-                    return LittleWebServer.HTTP.Response.ok(body: .data(dta,
-                                                                        contentType: encoder.littleWebServerContentType))
                 } catch ObjectSharingError.objectNotFound {
                     return self.generateNotFoundResponse(request: request,
                                                          handler: notFoundResponse,
@@ -533,12 +537,14 @@ public extension LittleWebServer {
                 
                 var errorResponseEvent: ErrorResponseEvent = .listGetter
                 do {
-                    let objs = try handler(request)
-                    errorResponseEvent = .encoding
-                    
-                    let dta = try encoder.encode(objs)
-                    return LittleWebServer.HTTP.Response.ok(body: .data(dta,
-                                                                        contentType: encoder.littleWebServerContentType))
+                    return try autoreleasepool {
+                        let objs = try handler(request)
+                        errorResponseEvent = .encoding
+                        
+                        let dta = try encoder.encode(objs)
+                        return LittleWebServer.HTTP.Response.ok(body: .data(dta,
+                                                                            contentType: encoder.littleWebServerContentType))
+                    }
                 } catch {
                     return self.generateErrorResponse(request: request,
                                                       handler: errorResponse,
@@ -681,28 +687,30 @@ public extension LittleWebServer {
                 
                 var errorResponseEvent: ErrorResponseEvent = .decoding
                 do {
-                    let objResponse = try decoder(request)
-                    
-                    switch objResponse {
-                        case .otherResponse(let rtn):
-                            return rtn
-                        case .error(let e):
-                            return self.generateErrorResponse(request: request,
-                                                              handler: errorResponse,
-                                                              event: errorResponseEvent,
-                                                              error: e,
-                                                              encoder: encoder)
-                        case .object(let obj):
-                            var responseBody: LittleWebServer.HTTP.Response.Body = .empty
-                            errorResponseEvent = .objectAdder
-                            let resp = try handler(request, obj)
-                            if let enc = getEncodableResponse(resp) {
-                                errorResponseEvent = .encoding
-                                let respDta = try encoder.encode(WrappedEncodable(enc))
-                                responseBody = .data(respDta, contentType: encoder.littleWebServerContentType)
-                            }
-                            
-                            return LittleWebServer.HTTP.Response.created(body: responseBody)
+                    return try autoreleasepool {
+                        let objResponse = try decoder(request)
+                        
+                        switch objResponse {
+                            case .otherResponse(let rtn):
+                                return rtn
+                            case .error(let e):
+                                return self.generateErrorResponse(request: request,
+                                                                  handler: errorResponse,
+                                                                  event: errorResponseEvent,
+                                                                  error: e,
+                                                                  encoder: encoder)
+                            case .object(let obj):
+                                var responseBody: LittleWebServer.HTTP.Response.Body = .empty
+                                errorResponseEvent = .objectAdder
+                                let resp = try handler(request, obj)
+                                if let enc = getEncodableResponse(resp) {
+                                    errorResponseEvent = .encoding
+                                    let respDta = try encoder.encode(WrappedEncodable(enc))
+                                    responseBody = .data(respDta, contentType: encoder.littleWebServerContentType)
+                                }
+                                
+                                return LittleWebServer.HTTP.Response.created(body: responseBody)
+                        }
                     }
                 } catch {
                     return self.generateErrorResponse(request: request,
@@ -808,10 +816,11 @@ public extension LittleWebServer {
                                                                      encoder: encoder))
                     
                 }
-                
-                let dta = try request.inputStream.read(exactly: Int(contentLength))
-                let obj = try decoder.decode(Object.self, from: dta)
-                return .object(obj)
+                return try autoreleasepool {
+                    let dta = try request.inputStream.read(exactly: Int(contentLength))
+                    let obj = try decoder.decode(Object.self, from: dta)
+                    return .object(obj)
+                }
             }
             
             return self.addObject(encoders: encoders,
@@ -926,21 +935,23 @@ public extension LittleWebServer {
                 }
                 var errorResponseEvent: ErrorResponseEvent = .decoding
                 do {
-                    let dta = try request.inputStream.read(exactly: Int(contentLength))
-                    let obj = try decoder.decode(Object.self, from: dta)
-                    var responseBody: LittleWebServer.HTTP.Response.Body = .empty
-                    errorResponseEvent = .objectUpdater
-                    
-                    let resp = try handler(request, obj)
-                    if let enc = getEncodableResponse(resp) {
-                        errorResponseEvent = .encoding
-                        let respDta = try encoder.encode(WrappedEncodable(enc))
-                        responseBody = .data(respDta, contentType: encoder.littleWebServerContentType)
-                    }
-                    if responseBody.isEmpty {
-                        return LittleWebServer.HTTP.Response.noContent()
-                    } else {
-                        return LittleWebServer.HTTP.Response.ok(body: responseBody)
+                    return try autoreleasepool {
+                        let dta = try request.inputStream.read(exactly: Int(contentLength))
+                        let obj = try decoder.decode(Object.self, from: dta)
+                        var responseBody: LittleWebServer.HTTP.Response.Body = .empty
+                        errorResponseEvent = .objectUpdater
+                        
+                        let resp = try handler(request, obj)
+                        if let enc = getEncodableResponse(resp) {
+                            errorResponseEvent = .encoding
+                            let respDta = try encoder.encode(WrappedEncodable(enc))
+                            responseBody = .data(respDta, contentType: encoder.littleWebServerContentType)
+                        }
+                        if responseBody.isEmpty {
+                            return LittleWebServer.HTTP.Response.noContent()
+                        } else {
+                            return LittleWebServer.HTTP.Response.ok(body: responseBody)
+                        }
                     }
     
                 } catch {
@@ -1085,20 +1096,22 @@ public extension LittleWebServer {
                 }
                 var errorResponseEvent: ErrorResponseEvent = .decoding
                 do {
-                    let dta = try request.inputStream.read(exactly: Int(contentLength))
-                    let obj = try decoder.decode(Object.self, from: dta)
-                    var responseBody: LittleWebServer.HTTP.Response.Body = .empty
-                    errorResponseEvent = .objectUpdater
-                    let resp = try handler(request, objectId, obj)
-                    if let enc = getEncodableResponse(resp) {
-                        errorResponseEvent = .encoding
-                        let respDta = try encoder.encode(WrappedEncodable(enc))
-                        responseBody = .data(respDta, contentType: encoder.littleWebServerContentType)
-                    }
-                    if responseBody.isEmpty {
-                        return LittleWebServer.HTTP.Response.noContent()
-                    } else {
-                        return LittleWebServer.HTTP.Response.ok(body: responseBody)
+                    return try autoreleasepool {
+                        let dta = try request.inputStream.read(exactly: Int(contentLength))
+                        let obj = try decoder.decode(Object.self, from: dta)
+                        var responseBody: LittleWebServer.HTTP.Response.Body = .empty
+                        errorResponseEvent = .objectUpdater
+                        let resp = try handler(request, objectId, obj)
+                        if let enc = getEncodableResponse(resp) {
+                            errorResponseEvent = .encoding
+                            let respDta = try encoder.encode(WrappedEncodable(enc))
+                            responseBody = .data(respDta, contentType: encoder.littleWebServerContentType)
+                        }
+                        if responseBody.isEmpty {
+                            return LittleWebServer.HTTP.Response.noContent()
+                        } else {
+                            return LittleWebServer.HTTP.Response.ok(body: responseBody)
+                        }
                     }
                 } catch ObjectSharingError.objectNotFound {
                     return self.generateNotFoundResponse(request: request,
@@ -1242,18 +1255,20 @@ public extension LittleWebServer {
                 var errorResponseEvent: ErrorResponseEvent = .objectDeleter
                 
                 do {
-                    var responseBody: LittleWebServer.HTTP.Response.Body = .empty
-                    let resp = try handler(request, objectId)
-                    if let enc = getEncodableResponse(resp) {
-                        errorResponseEvent = .encoding
-                        let respDta = try encoder.encode(WrappedEncodable(enc))
-                        responseBody = .data(respDta, contentType: encoder.littleWebServerContentType)
-                    }
-                    
-                    if responseBody.isEmpty {
-                        return LittleWebServer.HTTP.Response.noContent()
-                    } else {
-                        return LittleWebServer.HTTP.Response.ok(body: responseBody)
+                    return try autoreleasepool {
+                        var responseBody: LittleWebServer.HTTP.Response.Body = .empty
+                        let resp = try handler(request, objectId)
+                        if let enc = getEncodableResponse(resp) {
+                            errorResponseEvent = .encoding
+                            let respDta = try encoder.encode(WrappedEncodable(enc))
+                            responseBody = .data(respDta, contentType: encoder.littleWebServerContentType)
+                        }
+                        
+                        if responseBody.isEmpty {
+                            return LittleWebServer.HTTP.Response.noContent()
+                        } else {
+                            return LittleWebServer.HTTP.Response.ok(body: responseBody)
+                        }
                     }
                 } catch ObjectSharingError.objectNotFound {
                     return self.generateNotFoundResponse(request: request,

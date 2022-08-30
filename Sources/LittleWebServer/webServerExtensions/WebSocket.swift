@@ -439,8 +439,10 @@ public extension LittleWebServer {
                     while !webSocketClient.hasSentClosed &&
                           !Thread.current.isCancelled &&
                           !server.isStoppingOrStopped {
-                        let event = try webSocketClient.readEvent()
-                        webSocketEvent(webSocketClient, event)
+                        try autoreleasepool {
+                            let event = try webSocketClient.readEvent()
+                            webSocketEvent(webSocketClient, event)
+                        }
                     }
                     
                 }
