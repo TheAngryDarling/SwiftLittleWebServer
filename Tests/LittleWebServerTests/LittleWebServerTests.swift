@@ -107,6 +107,7 @@ class LittleWebServerTests: XCExtenedTestCase {
     override class func setUp() {
         self.initTestingFile()
         super.setUp()
+        FileManager.default.changeCurrentDirectoryPath(self.testsURL.path)
     }
     
     override class func tearDown() {
@@ -126,7 +127,7 @@ class LittleWebServerTests: XCExtenedTestCase {
                                                                    port: self.initPort,
                                                                    reuseAddr: true)
                     let rtn = LittleWebServer(listener)
-                    rtn.serverHeader = "CoolServer"
+                    rtn.serverName = "CoolServer"
                     rtn.serverErrorHandler = { err in
                         Swift.debugPrint("SERVER ERROR: \(err)")
                     }
@@ -221,8 +222,9 @@ class LittleWebServerTests: XCExtenedTestCase {
                     
                     do {
                         try output.write(eventData.data(using: .utf8)!)
-                        
+                        #if !DOCKER_ALL_BUILD
                         print("Sent event: \(count - 1)")
+                        #endif
                     } catch {
                         if output.isConnected {
                             XCTFail("OH NO: \(error)")
@@ -365,9 +367,13 @@ class LittleWebServerTests: XCExtenedTestCase {
         server.defaultHost["/socket"] = LittleWebServer.WebSocket.endpoint { client, event in
             switch event {
                 case .connected:
+                    #if !DOCKER_ALL_BUILD
                     print("[Server]: Client Connected")
+                    #endif
                 case .disconnected:
+                    #if !DOCKER_ALL_BUILD
                     print("[Server]: Client Disconnected")
+                    #endif
                 case .binary(let b):
                     do {
                         try client.writeBinary(b)
@@ -721,8 +727,8 @@ class LittleWebServerTests: XCExtenedTestCase {
                 
                 for resource in contents {
                     var isDir: Bool = false
-                    _ = FileManager.default.fileExists(atPath: resource.path,
-                                                       isDirectory: &isDir)
+                    _ = FileManager.default._fileExists(atPath: resource.path,
+                                                        isDirectory: &isDir)
                     
                     if isDir {
                         browseFolder(session: session,
@@ -890,13 +896,25 @@ class LittleWebServerTests: XCExtenedTestCase {
             
             
             print(webSocket.closeCode.rawValue)
-            print(webSocket.closeReason)
+            if let cr = webSocket.closeReason {
+                print("Close Reason: \(cr)")
+            } else {
+                print("Close Reason: nil")
+            }
             
         } else {
-            print("WARNING: testWebSocket Unavailable to test due to no client support on the current platform")
+            // DOCKER_ALL_BUILD is a -D flag passed from within my custom build script when building agains
+            // all avialable OpenSwft version.  When my script builds/tests all it would report any runs outputs that contain 'error:' or 'warning:'.  This flag now allows to stop the WARNING output only when building all
+            #if !DOCKER_ALL_BUILD
+                print("WARNING: testWebSocket Unavailable to test due to no client support on the current platform")
+            #endif
         }
         #else
-        print("WARNING: testWebSocket Unavailable to test due to no client support on the current platform")
+            // DOCKER_ALL_BUILD is a -D flag passed from within my custom build script when building agains
+            // all avialable OpenSwft version.  When my script builds/tests all it would report any runs outputs that contain 'error:' or 'warning:'.  This flag now allows to stop the WARNING output only when building all
+            #if !DOCKER_ALL_BUILD
+                print("WARNING: testWebSocket Unavailable to test due to no client support on the current platform")
+            #endif
         #endif
         
     }
@@ -925,17 +943,21 @@ class LittleWebServerTests: XCExtenedTestCase {
                 XCTFail("No data returned for object", file: file, line: line)
                 return
             }
+            
             do {
                 // do catch should not be required because XCTAssertsNoThrow does not throw
                 // but there seems to be some compile bug that requires it since we are
                 // in a closure
-                rtn = XCTAssertsNoThrow(try decoder.decode(T.self, from: data),
+                /*rtn = XCTAssertsNoThrow(try decoder.decode(T.self, from: data),
                                         "Unable to decode object of type '\(T.self)'",
                                         file: file,
-                                        line: line)
+                                        line: line)*/
+                rtn = try decoder.decode(T.self, from: data)
                 
             } catch {
-                XCTFail("Unexpected error: \(error)")
+                XCTFail("Unable to decode object of type '\(T.self)'",
+                        file: file,
+                        line: line)
             }
         }
         
@@ -1337,7 +1359,9 @@ class LittleWebServerTests: XCExtenedTestCase {
                     XCTFail("Unable to convert data into string")
                     return
                 }
+                #if !DOCKER_ALL_BUILD
                 Swift.print(str)
+                #endif
             }
         }
         guard let server = LittleWebServerTests.getServer() else {
@@ -1376,9 +1400,17 @@ class LittleWebServerTests: XCExtenedTestCase {
     }
     
     func testParallelRequests() {
-        let operations = OperationQueue()
-        // pause all operaions
-        operations.isSuspended = true
+       
+        #if _runtime(_ObjC)
+        let parallelCount: Int =  ProcessInfo.processInfo.activeProcessorCount * 50
+        #else
+        let parallelCount: Int =  150
+        #endif
+        #if !DOCKER_ALL_BUILD
+        print("Testing with \(parallelCount) threads")
+        #endif
+        
+        let group = DispatchGroup()
         
         guard let server = LittleWebServerTests.getServer() else {
             XCTFail("Unable to get server")
@@ -1392,48 +1424,78 @@ class LittleWebServerTests: XCExtenedTestCase {
             urlBase = URL(string: urlString)!
         }
         let webLocation = urlBase.appendingPathComponent("status")
-        let parallelCount: Int = 5
-        var taskCompleted: [Bool] = [Bool](repeating: false, count: parallelCount)
+        let webRequest = URLRequest(url: webLocation,
+                                    cachePolicy: .reloadIgnoringLocalAndRemoteCacheData)
+        //var taskCompleted: [Bool] = [Bool](repeating: false, count: parallelCount)
+        //let taskCompletedLock = NSLock()
+        var randGen = SystemRandomNumberGenerator()
         for i in 0..<parallelCount {
-            operations.addOperation {
-                let session = URLSession(configuration: URLSessionConfiguration.default)
+            group.enter()
+            DispatchQueue(label: "testParallelRequest[\(i)]").async {
                 
-                let semaphore = DispatchSemaphore(value: 0)
-                Swift.print("[\(i)](\(webLocation.absoluteString)): Starting Request")
-                let task = session.dataTask(with: webLocation) { data, response, error in
-                    defer {
-                        Swift.print("[\(i)](\(webLocation.absoluteString)): Finished Request")
-                        semaphore.signal()
-                        taskCompleted[i] = true
-                    }
-                    if let e =  error {
-                        XCTFail("[\(i)](\(webLocation.absoluteString)): Request Failed with the following error: \(e)")
-                    }
-                    guard let d = data else {
-                        XCTFail("[\(i)](\(webLocation.absoluteString)): Request Failed. No data returned")
-                        return
-                    }
-                    guard d.count > 0 else {
-                        XCTFail("[\(i)](\(webLocation.absoluteString)): Request Failed. Data reutrned 0 bytes")
-                        return
+                let s = TimeInterval(Int.random(in: 0..<(Int(Double(parallelCount) * 1.2)),
+                                                using: &randGen)) / 100.0
+                //let s = TimeInterval.random(in: 0.0..<((Double(parallelCount) * 1.2) / 100.0), using: &randGen)
+                #if !DOCKER_ALL_BUILD
+                Swift.print("Sleeping for \(s)")
+                #endif
+                Thread.sleep(forTimeInterval: s)
+                autoreleasepool {
+                    let session = URLSession(configuration: URLSessionConfiguration.default)
+                    
+                    //let semaphore = DispatchSemaphore(value: 0)
+                    #if !DOCKER_ALL_BUILD
+                    Swift.print("[\(i)](\(webLocation.absoluteString)): Starting Request")
+                    #endif
+                    #if !DOCKER_ALL_BUILD
+                    let startDate = Date()
+                    #endif
+                    let task = session.dataTask(with: webRequest) { data, response, error in
+                        defer {
+                            #if !DOCKER_ALL_BUILD
+                            Swift.print("[\(i)](\(webLocation.absoluteString)): Finished Request at '\(Date())', Duration: '\(Date().timeIntervalSince(startDate).magnitude)'")
+                            #endif
+                            
+                            //semaphore.signal()
+                            /*taskCompletedLock.lock()
+                            taskCompleted[i] = true
+                            taskCompletedLock.unlock()*/
+                            group.leave()
+                        }
+                        if let e =  error {
+                            XCTFail("[\(i)](\(webLocation.absoluteString)): Request Failed with the following error: \(e)")
+                            
+                            return
+                        }
+                        guard let d = data else {
+                            XCTFail("[\(i)](\(webLocation.absoluteString)): Request Failed. No data returned")
+                            return
+                        }
+                        guard d.count > 0 else {
+                            XCTFail("[\(i)](\(webLocation.absoluteString)): Request Failed. Data reutrned 0 bytes")
+                            return
+                        }
+                        
                     }
                     
+                    task.resume()
+                    //semaphore.wait()
                 }
-                
-                task.resume()
-                semaphore.wait()
             }
         }
         
-        // start operations
-        operations.maxConcurrentOperationCount = parallelCount
-        operations.isSuspended = false
+        //group.leave()
+        group.wait()
         
         
         // We wait until all tasks have returned
-        while !(taskCompleted.allSatisfy({ return $0 == true })) {
+        /*while !(taskCompleted.allSatisfy({ return $0 == true })) {
             Thread.sleep(forTimeInterval: 1)
-        }
+        }*/
+        #if !DOCKER_ALL_BUILD
+        print("Finished Parallel Testing of \(parallelCount) requests")
+        #endif
+        
         
         
     }
@@ -1451,14 +1513,19 @@ class LittleWebServerTests: XCExtenedTestCase {
             urlBase = URL(string: urlString)!
         }
         let webLocation = urlBase.appendingPathComponent("status")
+        let webRequest = URLRequest(url: webLocation, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData)
         let session = URLSession(configuration: URLSessionConfiguration.default)
         
         for i in 0..<5 {
             let semaphore = DispatchSemaphore(value: 0)
+            #if !DOCKER_ALL_BUILD
             Swift.print("[\(i)](\(webLocation.absoluteString)): Starting Request")
-            let task = session.dataTask(with: webLocation) { data, response, error in
+            #endif
+            let task = session.dataTask(with: webRequest) { data, response, error in
                 defer {
+                    #if !DOCKER_ALL_BUILD
                     Swift.print("[\(i)](\(webLocation.absoluteString)): Finished Request")
+                    #endif
                     semaphore.signal()
                 }
                 if let e =  error {
@@ -1541,9 +1608,11 @@ class LittleWebServerTests: XCExtenedTestCase {
     
     func testPathCondition() {
         let condition: LittleWebServerRoutePathConditions = "/path/public/:path{**}"
+        #if !DOCKER_ALL_BUILD
         print(condition)
         print(condition.count)
         print(condition.testPath("/path/public/"))
+        #endif
     }
     
     
@@ -1946,8 +2015,5 @@ class LittleWebServerTests: XCExtenedTestCase {
         ("testPathCondition", testPathCondition),
         ("testRoutePaths", testRoutePaths),
         ("testSHA1", testSHA1),
-        
-        
-        
     ]
 }
