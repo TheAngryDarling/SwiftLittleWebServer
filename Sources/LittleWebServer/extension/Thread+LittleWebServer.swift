@@ -29,4 +29,9 @@ extension Thread {
             }
         }
     }
+    
+    public var littleWebServerClient: LittleWebServerClient? {
+        get { return self.threadDictionary["LittleWebServerClient"] as? LittleWebServerClient }
+        set { self.threadDictionary["LittleWebServerClient"] = newValue }
+    }
 }
