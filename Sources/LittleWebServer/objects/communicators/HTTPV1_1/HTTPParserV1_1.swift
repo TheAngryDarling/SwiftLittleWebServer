@@ -20,15 +20,20 @@ internal struct HTTPParserV1_1 {
             repeat {
                 
                 guard (try client.readByte(into: &readByte)) else {
-                    throw LittleWebServerClientHTTPReadError.invalidRead(expectedBufferSize: 1, actualBufferSize: 0)
+                    throw LittleWebServerClientHTTPReadError.invalidRead(expectedBufferSize: 1,
+                                                                         actualBufferSize: 0)
                 }
                 //print(readByte)
                 httpLineData.append(readByte)
                 
-            } while !httpLineData.hasSuffix(LittleWebServer.CRLF_DATA) && client.isConnected
+            } while !httpLineData.hasSuffix(LittleWebServer.CRLF_DATA) &&
+                    client.isConnected &&
+                    !Thread.current.isCancelled
             
             // Remove CR+LF from end of bytes
-            httpLineData.removeLast(2)
+            if client.isConnected && !Thread.current.isCancelled {
+                httpLineData.removeLast(2)
+            }
             
             // Try creating string
             guard let rtn = String(data: httpLineData, encoding: .utf8) else {
