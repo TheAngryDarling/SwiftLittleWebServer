@@ -52,7 +52,7 @@ public extension LittleWebServer {
             let fileManager = FileManager.default
             var isDir: Bool = false
             
-            guard fileManager.fileExists(atPath: url.path, isDirectory: &isDir) else {
+            guard fileManager._fileExists(atPath: url.path, isDirectory: &isDir) else {
                 // Should not get here.
                 // File existance should be verified before calling
                 // sendFile method
@@ -391,7 +391,8 @@ public extension LittleWebServer {
                         if let vD = resourceValues.isDirectory {
                             isDir = vD
                         } else {
-                            _ = fileManager.fileExists(atPath: resource.path, isDirectory: &isDir)
+                            _ = fileManager._fileExists(atPath: resource.path,
+                                                        isDirectory: &isDir)
                         }
                         
                         let resourceSize = resourceValues.fileSize ?? -1
@@ -434,7 +435,8 @@ public extension LittleWebServer {
                            let v = vd.isDirectory {
                             isDir = v
                         } else {
-                            _ = fileManager.fileExists(atPath: resource.path, isDirectory: &isDir)
+                            _ = fileManager._fileExists(atPath: resource.path,
+                                                        isDirectory: &isDir)
                         }
                         
                         let objectName = resource.lastPathComponent
@@ -564,7 +566,8 @@ public extension LittleWebServer {
                 //let defaultUpdateResponseMethod: [HTTP.Method] = [.put, .patch]
                 if defaultGetResponesMethods.contains(request.method) {
                     var isDir: Bool = false
-                    guard FileManager.default.fileExists(atPath: fsLocation.path, isDirectory: &isDir) else {
+                    guard FileManager.default._fileExists(atPath: fsLocation.path,
+                                                          isDirectory: &isDir) else {
                         return .notFound(body: fileNotFound(request, controller))
                     }
                     
