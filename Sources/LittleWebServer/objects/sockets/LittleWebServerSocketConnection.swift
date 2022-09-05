@@ -7,7 +7,6 @@
 
 import Foundation
 import Dispatch
-import SynchronizeObjects
 
 
 public extension LittleWebServerSocketConnection {
@@ -839,7 +838,7 @@ open class LittleWebServerSocketConnection: NSObject {
     public static let SOCKET_INVALID_DESCRIPTOR: SocketDescriptor = -1
     
     
-    private let _socketDescriptor: SyncLockObj<SocketDescriptor>
+    private let _socketDescriptor: _SyncLock<SocketDescriptor>
     /// The current socket descriptor of the connection
     public var socketDescriptor: SocketDescriptor {
         return self._socketDescriptor.value

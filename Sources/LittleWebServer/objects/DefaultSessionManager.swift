@@ -7,7 +7,6 @@
 
 import Foundation
 import Dispatch
-import SynchronizeObjects
 
 internal extension LittleWebServer {
     /// The default session manager.  Used for containing clients sessions
@@ -58,7 +57,7 @@ internal extension LittleWebServer {
         
         
         public var sessionTimeOutLimit: TimeInterval = 600.0 // 10 min
-        private let sessions: SyncLockObj<[Session]> = .init(value: [])
+        private let sessions: _SyncLock<[Session]> = .init()
         private let sessionInvalidatorQueueRepeatTime: TimeInterval = 60.0
         private let sessionInvalidatorQueue = DispatchQueue(label: "LittleWebServer.DefaultSessionManager.sessionInvalidatorQueue", qos: .background)
         

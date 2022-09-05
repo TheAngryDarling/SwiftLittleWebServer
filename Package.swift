@@ -16,12 +16,6 @@ let package = Package(
         .package(name: "StringIANACharacterSetEncoding",
                  url: "https://github.com/TheAngryDarling/SwiftStringIANACharacterSetEncoding.git",
                  from: "2.0.4"),
-        .package(name: "Nillable",
-                 url: "https://github.com/TheAngryDarling/SwiftNillable.git",
-                 from: "1.0.5"),
-        .package(name: "SynchronizeObjects",
-                 url: "https://github.com/TheAngryDarling/SwiftSynchronizeObjects",
-                 from: "1.0.3"),
         
         // Packages for Unit Testing
         .package(name: "UnitTestingHelper",
@@ -33,9 +27,7 @@ let package = Package(
         // Targets can depend on other targets in this package, and on products in packages which this package depends on.
         .target(
             name: "LittleWebServer",
-            dependencies: ["StringIANACharacterSetEncoding",
-                           "Nillable",
-                           "SynchronizeObjects"]),
+            dependencies: ["StringIANACharacterSetEncoding"]),
         .testTarget(
             name: "LittleWebServerTests",
             dependencies: ["LittleWebServer",

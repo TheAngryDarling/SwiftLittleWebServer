@@ -7,7 +7,6 @@
 
 import Foundation
 import Dispatch
-import SynchronizeObjects
 
 public extension LittleWebServer.HTTP.Communicators {
     /// A HTTP/1.1 Server
@@ -15,13 +14,13 @@ public extension LittleWebServer.HTTP.Communicators {
         
         public let httpVersion: LittleWebServer.HTTP.Version = .v1_1
         
-        private let queueSyncList: SyncLockObj<[LittleWebServer.WorkerQueue: NSLock]> = .init()
+        private let queueSyncList: _SyncLock<[LittleWebServer.WorkerQueue: NSLock]> = .init()
         
-        private let threads: SyncLockObj<[Thread]> = .init()
+        private let threads: _SyncLock<[Thread]> = .init()
         
         public var threadStopTimeout: TimeInterval = 30.0
         
-        private let queueOprationCount: SyncLockObj<[LittleWebServer.WorkerQueue: UInt]> = .init()
+        private let queueOprationCount: _SyncLock<[LittleWebServer.WorkerQueue: UInt]> = .init()
         
         
         private var _maxWorkerCounts: [LittleWebServer.WorkerQueue: Int] = [:] {

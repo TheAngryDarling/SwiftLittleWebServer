@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import Nillable
 
 public extension LittleWebServer {
     /// Methods / Logic for Object Sharing
@@ -209,7 +208,7 @@ public extension LittleWebServer {
                 return
             } else if value is Encodable.Type {
                 return
-            } else if let nilType = value as? Nillable.Type,
+            } else if let nilType = value as? _Nillable.Type,
                       value != NSNull.self &&
                         nilType.wrappedType is Encodable.Type {
                 return
@@ -227,7 +226,7 @@ public extension LittleWebServer {
                 return nil
             } else if let rtn = value as? Encodable {
                 return rtn
-            } else if let nilValue = value as? Nillable,
+            } else if let nilValue = value as? _Nillable,
                       valueType != NSNull.self &&
                         nilValue.wrappedType is Encodable {
                 if let v = nilValue.safeRootUnwrap {

@@ -7,7 +7,6 @@
 
 import Foundation
 import Dispatch
-import SynchronizeObjects
 
 
 /// A base for any Socket listener
@@ -18,7 +17,7 @@ open class LittleWebServerSocketListener: LittleWebServerSocketConnection,
     public static let DEFAULT_MAX_BACK_LOG_SIZE: Int32 = 127
     
     
-    private let _isListening: SyncLockObj<Bool> = .init(value: false)
+    private let _isListening: _SyncLock<Bool> = .init(value: false)
     open var isListening: Bool {
         return self._isListening.value
     }
