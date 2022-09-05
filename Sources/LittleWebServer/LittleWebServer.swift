@@ -8,7 +8,6 @@
 import Foundation
 import Dispatch
 import StringIANACharacterSetEncoding
-import Nillable
 
 public extension LittleWebServer {
     
@@ -115,22 +114,27 @@ public extension LittleWebServer {
         
         /// Close the open file
         public func close() {
-            #if swift(>=4.2) && _runtime(_ObjC)
-            try? self.handle.close()
+            #if _runtime(_ObjC)
+            if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *) {
+                try? self.handle.close()
+            } else {
+                self.handle.closeFile()
+            }
             #else
             self.handle.closeFile()
             #endif
+            
         }
         /// Change the current offset within the given file
         public func seek(to offset: UInt) throws {
-            #if swift(>=4.2) && _runtime(_ObjC)
-                if #available(macOS 10.15.4, iOS 13.4, tvOS 13.4, watchOS 6.2, *) {
-                    try self.handle.seek(toOffset: UInt64(offset))
-                } else {
-                    self.handle.seek(toFileOffset: UInt64(offset))
-                }
-            #else
+            #if _runtime(_ObjC)
+            if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *) {
+                try self.handle.seek(toOffset: UInt64(offset))
+            } else {
                 self.handle.seek(toFileOffset: UInt64(offset))
+            }
+            #else
+            self.handle.seek(toFileOffset: UInt64(offset))
             #endif
             self.currentOffset = offset
         }
@@ -692,8 +696,10 @@ public extension LittleWebServer {
                         let fieldComponents = components[i].split(separator: "=").map(String.init)
                         guard fieldComponents.count == 2 else { return nil }
                         var value = fieldComponents[1]
-                        value.removeFirst() // remove leading "
-                        value.removeLast() // remove trailing "
+                        if value.hasPrefix("\"") && value.hasSuffix("\"") {
+                            value.removeFirst() // remove leading "
+                            value.removeLast() // remove trailing "
+                        }
                         
                         if fieldComponents[0] == " name" {
                             nm = value
@@ -2460,51 +2466,7 @@ public extension LittleWebServer {
             /// HTTP Resposne Headers
             public struct Headers: _LittleWebServerCommonHeaders {
                 public typealias HeaderValue = [String]
-                /*
-                /// HTTP Response Header Value
-                public enum HeaderValue {
-                    case value(String)
-                    case array([String])
-                    
-                    internal var values: [String] {
-                        switch self {
-                            case .value(let rtn): return [rtn]
-                            case .array(let rtn): return rtn
-                        }
-                    }
-                    
-                    internal var stringValue: String? {
-                        guard case .value(let rtn) = self else { return nil }
-                        return rtn
-                    }
-                    
-                    internal var arrayValue: [String]? {
-                        guard case .array(let rtn) = self else { return nil }
-                        return rtn
-                    }
-                    
-                    public init<N>(_ numeric: N) where N: Numeric {
-                        self = .value("\(numeric)")
-                    }
-                    public init(_ bool: Bool) {
-                        self = .value("\(bool)")
-                    }
-                    public init(gmtDate: Date) {
-                        self = .value(LittleWebServer.dateHeaderFormatter.string(from: gmtDate))
-                    }
-                    public init?<S>(_ string: S?) where S: StringProtocol {
-                        guard let s = string else { return nil }
-                        let string = (s as? String) ?? String(s)
-                        self = .value(string)
-                    }
-                    public init?<SC>(_ strings: SC?) where SC: Collection, SC.Element: StringProtocol {
-                        guard let strings = strings else { return nil }
-                        guard strings.count > 0 else { return nil }
-                        let array = (strings as? [String]) ?? strings.map({ return String($0) })
-                        self = .array(array)
-                    }
-                }
-                */
+                
                 public typealias ContentEncoding = Helpers.OpenEquatableEnum<HTTP.Headers.ContentEncoding>
                 
                 public struct TransferEncodings: Equatable,
@@ -3310,15 +3272,22 @@ public extension LittleWebServer {
         public typealias HTTPRequest = LittleWebServer.HTTP.Request
         public typealias HTTPResponse = LittleWebServer.HTTP.Response
         
-        internal class Route<Handler> where Handler: LittleWebServerRouteHandler {
-            public let condition: LittleWebServerRoutePathConditions.RoutePathConditionComponent
+        internal class RouteBase {
+            public typealias RoutePathConditionComponent = LittleWebServerRoutePathConditions.RoutePathConditionComponent
+            public let condition: RoutePathConditionComponent
+            public init(condition: RoutePathConditionComponent) {
+                self.condition = condition
+            }
+        }
+        internal class Route<Handler>: RouteBase where Handler: LittleWebServerRouteHandler {
+            
             public var handler: Handler
             public var childRoutes: [Route] = []
             
-            public init(condition: LittleWebServerRoutePathConditions.RoutePathConditionComponent,
+            public init(condition: RoutePathConditionComponent,
                         handler: Handler = .init()) {
-                self.condition = condition
                 self.handler = handler
+                super.init(condition: condition)
             }
             
             internal var hasHandlers: Bool {
@@ -3347,21 +3316,22 @@ public extension LittleWebServer {
                 
             }
             
+            private func createRoute( _ condition: LittleWebServerRoutePathConditions.RoutePathConditionComponent) -> Route {
+                let rtn = Route(condition: condition)
+                 self.childRoutes.append(rtn)
+                 
+                 self.childRoutes.sortRoutes()
+                 //print("Child Routes sorted '\(self.condition.string)'\n\(self.childRoutes.map({ return $0.condition.string }))")
+                 
+                 
+                 return rtn
+            }
+            
             public func getRouteForPathOrCreate(_ components: [LittleWebServerRoutePathConditions.RoutePathConditionComponent]) -> Route {
                 var components = components
-                guard components.count > 0 else { return self }
+                guard let firstCondition = components.first else { return self }
                 
-                let route = self.childRoutes.first(where: { return $0.condition == components.first! }) ?? {
-                   let rtn = Route(condition: components.first!)
-                    self.childRoutes.append(rtn)
-                    
-                    
-                    self.childRoutes.sort(by: { return $0.condition.pathCondition < $1.condition.pathCondition })
-                    //print("Child Routes sorted '\(self.condition.string)'\n\(self.childRoutes.map({ return $0.condition.string }))")
-                    
-                    
-                    return rtn
-                }()
+                let route: Route = self.childRoutes.first(withPathCondition: firstCondition) ?? self.createRoute(firstCondition)
                 
                 components.remove(at: 0)
                 return route.getRouteForPathOrCreate(components)
@@ -3480,9 +3450,10 @@ public extension LittleWebServer {
             
             private func getRoute(for components: [LittleWebServerRoutePathConditions.RoutePathConditionComponent]) -> Route<Handler>? {
                 var components = components
-                guard components.count > 0 else { return nil }
-                guard let route = self.routes.first(where: { return $0.condition == components.first! }) else {
-                    return  nil
+                guard let firstComponent = components.first else { return nil }
+                
+                guard let route = self.routes.first(withPathCondition: firstComponent) else {
+                    return nil
                 }
                 
                 components.remove(at: 0)
@@ -3499,7 +3470,7 @@ public extension LittleWebServer {
                 precondition(components.count > 0, "Invalid Component Paths")
                 
                 
-                let route = self.routes.first(where: { return $0.condition == components.first! }) ?? {
+                let route: Route<Handler> = self.routes.first(where: { return $0.condition == components.first! }) ?? {
                     let rtn = Route<Handler>(condition: components.first!)
                     self.routes.append(rtn)
                     return rtn
@@ -3648,9 +3619,7 @@ public extension LittleWebServer {
                 public typealias LockedRequestServerHandler = (HTTPRequest, LittleWebServer) -> RouteResponse
                 public typealias Handler = Optional<FullHandler>
                 
-                private let routesSync = DispatchQueue(label: "LittleWebServer.Routing.Requests.Routes.routes.sync")
-                private var routes: [Route<Handler>] = []
-                //private var folderRoute: Route<Handler> = Route<Handler>.init(condition: .anything())
+                private let routes: _SyncLock<[Route<Handler>]> = .init(value: [])
                 
                 
                 public subscript(paths: LittleWebServerRoutePathConditions...) -> (LittleWebServerRoutePathConditions, RouteController?, Routes<HTTPResponse>?, Routes<HTTPResponse.Head>?) -> Void {
@@ -3861,9 +3830,14 @@ public extension LittleWebServer {
                     //guard components.count > 0 else { return self.folderRoute }
                     
                     var components = components
-                    guard components.count > 0 else { return nil }
+                    guard let firstComponent = components.first else { return nil }
                     // Find the first route
-                    guard let route = self.routesSync.sync(execute: { return self.routes.first(where: { return $0.condition == components.first! }) }) else {
+                    let r = self.routes.first {
+                        return $0.condition == firstComponent
+                    }
+                    
+                    
+                    guard let route = r else {
                         return  nil
                     }
                     
@@ -3880,19 +3854,21 @@ public extension LittleWebServer {
                     //guard components.count > 0 else { return self.folderRoute }
                     
                     var components = components
-                    precondition(components.count > 0, "Invalid Component Paths")
+                    guard let firstComponent = components.first else {
+                        preconditionFailure("Invalid Component Paths")
+                    }
                     
-                    
-                    let route = self.routesSync.sync {
-                        return self.routes.first(where: { return $0.condition == components.first! }) ?? {
-                            let rtn = Route<Handler>(condition: components.first!)
-                            self.routes.append(rtn)
+                    let route: Route<Handler> = self.routes.lockingForWithValue { ptr in
+                        guard let rtn = ptr.pointee.first(withPathCondition: firstComponent) else {
+                            let rtn = Route<Handler>(condition: firstComponent)
+                            ptr.pointee.append(rtn)
                             // sort routes so * and ** will be at the bottom
                             // giving way for more specific routes to test first
-                            self.routes.sort(by: { return $0.condition.pathCondition < $1.condition.pathCondition })
+                            ptr.pointee.sortRoutes()
                             //print("Routes sorted\n\(self.routes.map({ return $0.condition.string }))")
                             return rtn
-                        }()
+                        }
+                        return rtn
                     }
                     
                     components.remove(at: 0)
@@ -3904,8 +3880,8 @@ public extension LittleWebServer {
                 }
                 
                 internal override var hasHandlers: Bool {
-                    return self.routesSync.sync {
-                        return self.routes.contains(where: { return $0.hasHandlers })
+                    return self.routes.contains {
+                        return $0.hasHandlers
                     }
                 }
                 
@@ -3913,7 +3889,7 @@ public extension LittleWebServer {
                                                         in controller: RouteController,
                                                         on server: LittleWebServer) throws -> Bool {
                     
-                    for r in self.routes {
+                    for r in self.routes.unsafeValue {
                         if try r.getHandler(for: request, on: server) != nil {
                             return true
                         }
@@ -3924,7 +3900,7 @@ public extension LittleWebServer {
                 internal override func processRequest(for request: HTTPRequest,
                                                       in controller: RouteController,
                                                       on server: LittleWebServer) throws -> HTTPResponse? {
-                    for r in self.routes {
+                    for r in self.routes.unsafeValue {
                         //let a = try r.getHandler(for: request, on: server)
                         //print("Checking route '\(r.condition.string)' for '\(request.contextPath)': \(a)")
                         if let h = try r.getHandler(for: request, on: server),
@@ -3973,8 +3949,7 @@ public extension LittleWebServer {
                 public typealias Handler = Optional<FullHandler>
                 
                 
-                private var routesSyncLock = DispatchQueue(label: "LittleWebServer.Routing.Requests.RouteController.routes.sync")
-                private var routes: [HTTP.Method: BaseRoutes] = [:]
+                private let routes: _SyncLock<[HTTP.Method: BaseRoutes]> = .init()
                 
                 public var head: HTTPResponseHeadRoute {
                     return self.getOrCreateRoute(for: .head, ofType: HTTPResponseHeadRoute.self)
@@ -4044,7 +4019,7 @@ public extension LittleWebServer {
                 }
                 
                 public var allRouters: [BaseRoutes] {
-                    return Array(self.routes.values)
+                    return Array(self.routes.value.values)
                 }
                 
                 private let defaultRouter: HTTPResponseRoute = .init(method: .get)
@@ -4298,9 +4273,7 @@ public extension LittleWebServer {
                 #endif
                 
                 private func getRoute(for method: HTTP.Method) -> BaseRoutes? {
-                    return self.routesSyncLock.sync {
-                        return self.routes[method]
-                    }
+                    return self.routes[method]
                 }
                 
                 private func getOrCreateRoute<T>(for method: HTTP.Method, ofType: T.Type) -> T where T: BaseRoutes {
@@ -4310,18 +4283,21 @@ public extension LittleWebServer {
                     } else if method != .head && T.self != HTTPResponseRoute.self {
                         preconditionFailure("Method '\(method.rawValue)' requires route type of '\(HTTPResponseRoute.self)'")
                     }
-                    return self.routesSyncLock.sync {
-                        var rt = self.routes[method]
-                        if rt == nil {
-                            rt = T(method: method)
-                            self.routes[method] = rt!
-                        }
-                        
-                        guard let rtn = rt! as? T else {
-                            preconditionFailure("Could not cast \(type(of: rt!)) to \(T.self)")
+                    
+                    let rt: BaseRoutes = self.routes.lockingForWithValue { ptr in
+                        guard let rtn = ptr.pointee[method] else {
+                            let rtn = T(method: method)
+                            ptr.pointee[method] = rtn
+                            return rtn
                         }
                         return rtn
                     }
+                    
+                    guard let rtn = rt as? T else {
+                        preconditionFailure("Could not cast \(type(of: rt)) to \(T.self)")
+                    }
+                    return rtn
+                    
                 }
                 
                 
@@ -4428,24 +4404,26 @@ public extension LittleWebServer {
             }
             
             public class HostRoutes {
-                private let syncLock = DispatchQueue(label: "LittleWebServer.HostRoutes.routes")
-                private var routes: [String: Requests.RouteController] = [:]
+                private let routes: _SyncLock<[String: Requests.RouteController]> = .init()
                 private weak var server: LittleWebServer?
                 
                 public subscript(host: HTTP.Headers.Host) -> Requests.RouteController {
                     get {
-                        return self.syncLock.sync {
-                            if !self.routes.keys.contains(host.name.description) {
-                                precondition(self.server != nil, "Server has been lost")
-                                self.routes[host.name.description] = .init(server: self.server!)
+                        return self.routes.lockingForWithValue { ptr in
+                            guard let rtn = ptr.pointee[host.name.description] else {
+                                guard let s = self.server else {
+                                    preconditionFailure("Server has been lost")
+                                }
+                                
+                                let rtn = Requests.RouteController(server: s)
+                                ptr.pointee[host.name.description] = rtn
+                                return rtn
                             }
-                            return self.routes[host.name.description]!
+                            return rtn
                         }
                     }
                     set {
-                        self.syncLock.sync {
-                            self.routes[host.name.description] = newValue
-                        }
+                        self.routes[host.name.description] = newValue
                     }
                 }
                 
@@ -4469,13 +4447,14 @@ public extension LittleWebServer {
                         return defaultRoutes()
                     }
                     
-                    return self.syncLock.sync(execute: { return self.routes[host.name.description] }) ??  defaultRoutes()
+                    return self.routes[host.name.description] ??  defaultRoutes()
                 }
                 
                 internal func getRoutes(for request: HTTP.Request?,
                                         withDefault defaultRoutes: @autoclosure () -> Requests.RouteController) -> Requests.RouteController {
                     
-                    return self.getRoutes(for: request?.headers.host, withDefault: defaultRoutes())
+                    return self.getRoutes(for: request?.headers.host,
+                                          withDefault: defaultRoutes())
                 }
             }
         }
@@ -4506,24 +4485,28 @@ internal extension LittleWebServer {
             }
             
             
-            self.queue = DispatchQueue(label: "LittleWebServer.ListenerControl[\(self.listener.uid)]")
+            self.queue = DispatchQueue(label: "LittleWebServer.ListenerControl[\(self.listener.uid)].accept queue")
             
             self.queue!.async {
                 repeat {
                     do {
                         
                         // Wait until we have an available worker to use to process the request
-                        self.webserver.httpCommunicator.waitForQueueToBeAvailable(queue: .request, on: self.webserver)
+                        self.webserver.httpCommunicator.waitForQueueToBeAvailable(queue: .request,
+                                                                                  on: self.webserver)
                         // Ensure we haven't stopped
                         guard !self.webserver.isStoppingOrStopped &&
-                                !Thread.current.isCancelled else { return }
+                              !Thread.current.isCancelled &&
+                              self.listener.isListening else { return }
                         //print("Waiting for client")
                         let client = try self.listener.accept()
                         //
                         guard self.webserver.allowConnection(client) else {
+                            client.close()
                             continue
                         }
                         self.webserver.onAcceptedClient(client, from: self.listener)
+                        
                         
                     } catch {
                         if !self.webserver.isStoppingOrStopped &&
@@ -4672,6 +4655,7 @@ public class LittleWebServer {
     public enum ServerEvent {
         public enum ClientDisconnectReason {
             case normal
+            case clientDisconnected
             case badRequest(String?)
             case readRequestTimedOut
         }
@@ -4682,7 +4666,15 @@ public class LittleWebServer {
     
     private let httpCommunicator: LittleWebServerHTTPCommunicator
     //public var httpVersion: HTTP.Version { return self.httpCommunicator.httpVersion }
-    public var serverHeader: String?
+    
+    /// The name of the server used as the Server Response Header
+    public var serverName: String?
+    
+    @available(*, deprecated, renamed: "serverName")
+    public var serverHeader: String? {
+        get { return self.serverName }
+        set { self.serverName = newValue }
+    }
     
     public var temporaryFileUploadLocation: URL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("LittleWebServer")
     
@@ -4698,15 +4690,14 @@ public class LittleWebServer {
     
     internal var dateHeaderFormatter: DateFormatter { return LittleWebServer.dateHeaderFormatter }
     
-    private let stateSyncLock = DispatchQueue(label: "LittleWebServer.state.sync")
+    private let _state: _SyncLock<State> = .init(value: .stopped)
     /// The current state of the web server
-    public private(set) var state: State = .stopped
+    public var state: State { return self._state.value }
     
-    private let listenerControlsSyncLock = DispatchQueue(label: "LittleWebServer.listeners.sync")
-    private var listenerControls: [ListenerControl] = []
+    private let listenerControls: _SyncLock<[ListenerControl]> = .init()
     
     public var initialRequestTimeoutInSeconds: Double = 7.0
-    public static let DEFAULT_WORKER_COUNT: Int = -1
+    public static let DEFAULT_WORKER_COUNT: Int = Int.max
     
     private var waitStoppedSyncLock = DispatchSemaphore(value: 0)
     
@@ -4940,34 +4931,32 @@ public class LittleWebServer {
 
     /// Indicator if the server is in running state
     public var isRunning: Bool {
-        return self.stateSyncLock.sync {
-            return self.state == .running
+        return self._state.lockingForWithValue { ptr in
+            return ptr.pointee == .running
         }
     }
     /// Indicator if the server is in starting or running states
     public var isStartingOrRunning: Bool {
-        return self.stateSyncLock.sync {
-            return self.state == .starting || self.state == .running
+        return self._state.lockingForWithValue { ptr in
+            return ptr.pointee == .starting || ptr.pointee == .running
         }
     }
     /// Indicator if the server is in stopped state
     public var isStopped: Bool {
-        return self.stateSyncLock.sync {
-            return self.state == .stopped
+        return self._state.lockingForWithValue { ptr in
+            return ptr.pointee == .stopped
         }
     }
     /// Indicator if the server is in stopping or stopped states
     public var isStoppingOrStopped: Bool {
-        return self.stateSyncLock.sync {
-            return self.state == .stopping || self.state == .stopped
+        return self._state.lockingForWithValue { ptr in
+            return ptr.pointee == .stopping || ptr.pointee == .stopped
         }
     }
     /// A list of the listenres being used by the web server
     public var listeners: [LittleWebServerListener] {
         get {
-            return self.listenerControlsSyncLock.sync {
-                return self.listenerControls.map({ return $0.listener })
-            }
+            return self.listenerControls.map({ return $0.listener })
         }
     }
     /// The maximum workers allowed for the generate requests
@@ -5074,10 +5063,16 @@ public class LittleWebServer {
         self.httpCommunicator = httpCommunicator
         self.sessionManager = sessionManager
         
-        self.listenerControls = listeners.map {
+        let lcs = listeners.map {
             return try! self.createListenerControl(for: $0)
         }
         
+        self.listenerControls.append(contentsOf: lcs)
+    }
+    
+    deinit {
+        // Call stop to ensure server shuts down
+        self.stop()
     }
     
     /// Create a new Web Server
@@ -5131,20 +5126,26 @@ public class LittleWebServer {
     /// Add a new listener to the web server after the server has been created
     /// - Parameter listener: The new listener to add
     public func addListener(_ listener: LittleWebServerListener) throws {
-        try self.listenerControlsSyncLock.sync {
-            guard !self.listenerControls.contains(where: { $0.listener.uid == listener.uid }) else { return }
+        
+        try self.listenerControls.lockingForWithValue { ptr in
+        
+            guard !ptr.pointee.contains(where: { $0.listener.uid == listener.uid }) else {
+                return
+            }
             let controller = try self.createListenerControl(for: listener)
-            self.listenerControls.append(controller)
-            self.listenerControls.sort()
+            ptr.pointee.append(controller)
+            ptr.pointee.sort()
         }
+        
     }
     
     /// Remove the listener from the web server
     /// - Parameter listener: The listener to remove
     public func removeListener(_ listener: LittleWebServerListener) throws {
-        self.listenerControlsSyncLock.sync {
+        
+        self.listenerControls.lockingForWithValue { ptr in
             var index: Int? = nil
-            for (i, value) in self.listenerControls.enumerated() {
+            for (i, value) in ptr.pointee.enumerated() {
                 if value.listener.uid == listener.uid {
                     index = i
                     break
@@ -5154,10 +5155,9 @@ public class LittleWebServer {
                 return
             }
             
-            let controller = self.listenerControls.remove(at: idx)
+            let controller = ptr.pointee.remove(at: idx)
             
             controller.stop()
-            
         }
     }
     
@@ -5224,29 +5224,33 @@ public class LittleWebServer {
     
     /// Start the server
     public func start() throws {
-        try self.stateSyncLock.sync {
-            guard self.state == .stopped else {
+        try self._state.lockingForWithValue { ptr in
+        
+            guard ptr.pointee == .stopped else {
                 throw WebServerError.serverNotStopped
             }
             
-            self.state = .starting
+            ptr.pointee = .starting
             
             var startErrors: [WebServerError] = []
-            
-            for controller in self.listenerControls {
-                do {
-                    try controller.start()
-                } catch {
-                    startErrors.append(.startError(listener: controller.listener, error: error))
+            self.listenerControls.lockingFor {
+                for controller in self.listenerControls.unsafeValue {
+                    do {
+                        try controller.start()
+                    } catch {
+                        startErrors.append(.startError(listener: controller.listener, error: error))
+                    }
+                }
+                
+                if startErrors.count == self.listenerControls.unsafeValue.count {
+                    ptr.pointee = .stopped
+                } else {
+                
+                    ptr.pointee = .running
                 }
             }
             
-            if startErrors.count == self.listenerControls.count {
-                self.state = .stopped
-            } else {
             
-                self.state = .running
-            }
             
             if startErrors.count > 1 {
                 throw WebServerError.compoundError(startErrors)
@@ -5254,24 +5258,32 @@ public class LittleWebServer {
                 throw startErrors.first!
             }
         }
+        
     }
     /// Stop the server
     public func stop() {
-        self.stateSyncLock.sync {
-            guard self.state == .starting || self.state == .running else {
+        
+        self._state.lockingForWithValue { ptr in
+        
+            guard ptr.pointee == .starting || ptr.pointee == .running else {
                 return
             }
             
-            for controller in self.listenerControls {
-                controller.stop()
+            self.httpCommunicator.serverStopping()
+            
+            self.listenerControls.lockingFor {
+                for controller in self.listenerControls.unsafeValue {
+                    controller.stop()
+                }
             }
             
             
-            self.state = .stopped
+            ptr.pointee = .stopped
             
             self.waitStoppedSyncLock.signal()
-            
         }
+            
+        
     }
     /// Wait for the running server to stop
     public func waitUntilStopped() {
