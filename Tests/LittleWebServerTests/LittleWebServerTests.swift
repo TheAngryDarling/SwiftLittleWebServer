@@ -1,7 +1,6 @@
 import XCTest
 import Dispatch
 @testable import LittleWebServer
-import UnitTestingHelper
 #if swift(>=4.1)
     #if canImport(FoundationNetworking)
     import FoundationNetworking

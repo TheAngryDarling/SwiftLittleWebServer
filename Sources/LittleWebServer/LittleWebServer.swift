@@ -7,7 +7,6 @@
 
 import Foundation
 import Dispatch
-import StringIANACharacterSetEncoding
 
 public extension LittleWebServer {
     
