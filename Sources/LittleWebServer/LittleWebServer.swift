@@ -1227,6 +1227,8 @@ public extension LittleWebServer {
                     return rtn
                 }
                 
+                public static let `default`: Host  = .init(name: "*")
+                
                 public init(name: Name, port: Int? = nil) {
                     self.name = name
                     self.port = port
@@ -4399,13 +4401,14 @@ public extension LittleWebServer {
             }
             
             public class HostRoutes {
-                private let routes: _SyncLock<[String: Requests.RouteController]> = .init()
+                //private let routes: _SyncLock<[String: Requests.RouteController]> = .init()
+                private let routes: _SyncLock<[HTTP.Headers.Host: Requests.RouteController]> = .init()
                 private weak var server: LittleWebServer?
                 
                 public subscript(host: HTTP.Headers.Host) -> Requests.RouteController {
                     get {
                         return self.routes.lockingForWithValue { ptr in
-                            guard let rtn = ptr.pointee[host.name.description] else {
+                            /*guard let rtn = ptr.pointee[host.name.description] else {
                                 guard let s = self.server else {
                                     preconditionFailure("Server has been lost")
                                 }
@@ -4414,26 +4417,37 @@ public extension LittleWebServer {
                                 ptr.pointee[host.name.description] = rtn
                                 return rtn
                             }
+                            return rtn*/
+                            guard let rtn = ptr.pointee[host] else {
+                                guard let s = self.server else {
+                                    preconditionFailure("Server has been lost")
+                                }
+                                
+                                let rtn = Requests.RouteController(server: s)
+                                ptr.pointee[host] = rtn
+                                return rtn
+                            }
                             return rtn
                         }
                     }
                     set {
-                        self.routes[host.name.description] = newValue
+                        //self.routes[host.name.description] = newValue
+                        self.routes[host] = newValue
                     }
                 }
                 
                 public var `default`: Requests.RouteController {
                     get {
-                        return self["*"]
+                        return self[.default]
                     }
                     set {
-                        self["*"] = newValue
+                        self[.default] = newValue
                     }
                 }
                 
                 public init(server: LittleWebServer) {
                     self.server = server
-                    self.routes["*"] = .init(server: server)
+                    self.routes[.default] = .init(server: server)
                 }
                 
                 internal func getRoutes(for host: HTTP.Headers.Host?,
@@ -4442,7 +4456,8 @@ public extension LittleWebServer {
                         return defaultRoutes()
                     }
                     
-                    return self.routes[host.name.description] ??  defaultRoutes()
+                    //return self.routes[host.name.description] ??  defaultRoutes()
+                    return self.routes[host] ??  defaultRoutes()
                 }
                 
                 internal func getRoutes(for request: HTTP.Request?,
