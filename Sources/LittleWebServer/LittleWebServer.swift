@@ -1227,6 +1227,11 @@ public extension LittleWebServer {
                     return rtn
                 }
                 
+                public init(name: Name, port: Int? = nil) {
+                    self.name = name
+                    self.port = port
+                }
+                
                 public init?<S>(_ value: S) where S: StringProtocol {
                     let value: String = (value as? String) ?? String(value)
                     
@@ -1246,19 +1251,10 @@ public extension LittleWebServer {
                 }
                 
                 public init(stringLiteral value: String) {
-                    let components: [String] = value.split(separator: ":").map(String.init)
-                    guard components.count >= 1 && components.count <= 2 else {
+                    guard let nv = Host(value) else {
                         fatalError("Invalid Host value '\(value)'")
                     }
-                    self.name = Name(components[0])
-                    if components.count == 2 {
-                        guard let p = Int(components[1]) else {
-                            fatalError("Invalid Host value '\(value)'.  Invalid Port Number '\(components[1])'")
-                        }
-                        self.port = p
-                    } else {
-                        self.port = nil
-                    }
+                    self = nv
                 }
                 
                 public static func ==(lhs: Host, rhs: Host) -> Bool {
