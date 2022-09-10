@@ -15,7 +15,7 @@ internal class HTTPLittleWebServerOutputStreamV1_1: LittleWebServerOutputStream 
     /// Indicator if data should be sent in cunks
     public let chunked: Bool
     /// Indicator to keep track if the zero (end) chunk has been sent
-    private var hasWrittenZeroChunk: Bool = false
+    public private(set) var hasWrittenZeroChunk: Bool = false
     /// The maximum chunk size to use.  If not set then will use the total size being written
     private let maxChunkedSize: Int?
     /// The maximum number of byte to buffer to read each time when transfering file data.  This can be overridden by the speed limiter
