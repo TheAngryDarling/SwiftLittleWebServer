@@ -378,11 +378,18 @@ public extension LittleWebServer.HTTP.Communicators {
                     try writer.writeContentsOfFile(atPath: pth, range: response.body.fileRange, speedLimit: speedLimit)
                 } else if let custom = response.body.customBody {
                     try custom(request?.inputStream ?? LittleWebServerEmptyInputStream(), writer)
+                    // ensures that after a custom body write has occured
+                    // that the end of reponse (zero byte) is send
+                    // if not done so by the custom body write
+                    if writer.isConnected && !writer.hasWrittenZeroChunk {
+                        try? writer.write([])
+                    }
                 }
                 
                 if workingHeaders.contentLength != nil && writeResponseEnding {
                     //try writer.writeUTF8("\r\n")
                 }
+                
                 
                 //if let ctl = bodyDetails?.length, ctl > 0 {
                 //if writer.isConnected {
